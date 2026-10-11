@@ -242,6 +242,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let pore_shape = pore_population * size_factor;
     let pore_shape_master = pore_shape * pore_strength;
     let pore_color_mask = pore_shape_master * clamp(u.pore_controls.y, 0.0, 1.0);
+    // Specular occlusion follows the complete pore opening mask independently
+    // from albedo darkening, matching the source add-on's separate controls.
+    let pore_specular_mask = pore_shape_master;
 
     // Source's generated tileable height map (six tiles per 0.22 m at Pore Scale 1).
     // The image map and procedural openings remain separate bump contributions.
@@ -284,7 +287,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     );
     let specular_power = mix(180.0, 5.0, roughness);
     let specular_strength = clamp(u.surface.y + oiliness * 0.35, 0.0, 1.0)
-        * (1.0 - clamp(pore_color_mask * u.optical_controls.x, 0.0, 0.9));
+        * (1.0 - clamp(pore_specular_mask * u.optical_controls.x, 0.0, 0.9));
     let specular = pow(max(dot(perturbed_normal, half_vector), 0.0), specular_power) * specular_strength;
     let back_scatter = pow(max(dot(-perturbed_normal, light_direction), 0.0), 2.0) * u.surface.z;
 
