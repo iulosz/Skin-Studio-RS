@@ -22,9 +22,12 @@
 - [ ] Validar visualmente no build Windows e refinar a resposta dos controles.
 
 ## M2 — Malhas e viewport 3D
-- [ ] Importar glTF/GLB e OBJ.
-- [ ] Criar buffers, câmera orbital, zoom/pan, grade real e seleção de objeto.
-- [ ] Normais/tangentes corretas e depth buffer.
+- [x] Importar malhas triangulares OBJ e glTF/GLB.
+- [x] Criar buffers de vértices/índices e normalizar escala/centro para a pré-visualização.
+- [x] Câmera orbital, zoom, pan por Shift+arraste e restauração de enquadramento.
+- [x] Grade 3D desenhada na GPU e depth buffer para superfícies.
+- [x] Carregamento de normais existentes e geração de normais ausentes.
+- [ ] Tangentes, seleção de múltiplos objetos e materiais por primitiva.
 - [ ] Interface preparada para receber novas referências visuais do usuário.
 
 ## M3 — Material de pele
