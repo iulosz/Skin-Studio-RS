@@ -453,13 +453,18 @@ mod tests {
 
     #[test]
     fn migrates_v3_presets_to_meter_coordinate_units() {
-        let mut material = SkinMaterial::default();
-        material.coord_unit = CoordinateUnit::Centimeter;
-        let v3 = SkinPreset::new("Schema 3", material).unwrap();
-        let mut json = v3.to_json_pretty().unwrap();
-        json = json.replace("\"schema_version\": 4", "\"schema_version\": 3");
-        json = json.replace(",\n    \"coord_unit\": \"centimeter\"", "");
-        json = json.replace(",\n    \"coord_custom_meters_per_unit\": 1.0", "");
+        let material = SkinMaterial::default();
+        let v4 = SkinPreset::new("Schema 3", material).unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&v4.to_json_pretty().unwrap()).unwrap();
+        value["schema_version"] = serde_json::Value::from(3);
+        let material_object = value["material"]
+            .as_object_mut()
+            .expect("preset material should be a JSON object");
+        material_object.remove("coord_unit");
+        material_object.remove("coord_custom_meters_per_unit");
+        let json = value.to_string();
+
         let migrated = SkinPreset::from_json(&json).unwrap();
         assert_eq!(migrated.schema_version, PRESET_SCHEMA_VERSION);
         assert_eq!(migrated.material.coord_unit, CoordinateUnit::Meter);
