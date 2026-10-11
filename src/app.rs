@@ -82,7 +82,8 @@ impl SkinStudioApp {
             Ok(preset) => {
                 self.params = preset.material;
                 self.preset_name = preset.name;
-                self.status = format!("Preset loaded: {}", self.preset_path);
+                self.regenerate_pore_map();
+                self.status = format!("Preset loaded: {} · pore map regenerated", self.preset_path);
             }
             Err(error) => self.status = format!("Preset load failed: {error}"),
         }
@@ -137,6 +138,7 @@ impl SkinStudioApp {
             ui.separator();
             if ui.button("Reset material").clicked() {
                 self.params = SkinMaterial::default();
+                self.regenerate_pore_map();
                 self.status = "Material values restored to defaults".to_owned();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
