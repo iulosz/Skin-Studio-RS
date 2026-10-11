@@ -87,6 +87,28 @@ impl SkinStudioApp {
         }
     }
 
+    fn import_mesh(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("3D meshes", &["obj", "gltf", "glb"])
+            .pick_file()
+        else {
+            return;
+        };
+
+        match crate::geometry::load_mesh(&path) {
+            Ok(mesh) => {
+                let name = mesh.name.clone();
+                let vertices = mesh.vertex_count();
+                let triangles = mesh.triangle_count();
+                self.preview.set_mesh(mesh);
+                self.status = format!("Imported {name} · {vertices} vertices · {triangles} triangles");
+            }
+            Err(error) => {
+                self.status = format!("Mesh import failed: {error}");
+            }
+        }
+    }
+
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("SKIN STUDIO");
@@ -140,10 +162,17 @@ impl SkinStudioApp {
         ui.add_space(6.0);
         egui::ScrollArea::vertical().show(ui, |ui| match self.active_tab {
             StudioTab::Setup => {
-                ui.label("Scene and model controls");
+                ui.label(egui::RichText::new("Scene and model").strong());
                 ui.separator();
-                ui.label("Mesh import and real-world scale will be added with the geometry system.");
-                ui.label("Initial preview primitive: procedural sphere.");
+                if ui.button("Import OBJ / glTF / GLB").clicked() {
+                    self.import_mesh();
+                }
+                ui.add_space(8.0);
+                ui.label(format!("Active mesh: {}", self.preview.mesh_name()));
+                ui.label(format!("Vertices: {}", self.preview.vertex_count()));
+                ui.label(format!("Triangles: {}", self.preview.triangle_count()));
+                ui.add_space(6.0);
+                ui.label("Imported meshes are centered and scaled to fit the preview. Triangle surfaces use a depth buffer.");
             }
             StudioTab::Color => {
                 ui.label(egui::RichText::new("Base pigmentation").strong());
@@ -240,8 +269,15 @@ impl eframe::App for SkinStudioApp {
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
                         ui.horizontal(|ui| {
-                            ui.heading("Material Preview");
-                            ui.label(egui::RichText::new("sphere · procedural").weak().small());
+                            ui.heading("3D Viewport");
+                            ui.label(
+                                egui::RichText::new(self.preview.mesh_name())
+                                    .weak()
+                                    .small(),
+                            );
+                            if ui.button("Reset view").clicked() {
+                                self.preview.reset_camera();
+                            }
                         });
                         ui.add_space(6.0);
                         egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -249,10 +285,11 @@ impl eframe::App for SkinStudioApp {
                             ui.allocate_ui_with_layout(
                                 size,
                                 egui::Layout::top_down(egui::Align::Min),
-                                |ui| self.preview.show(ui, self.params),
+                                |ui| self.preview.show(ui, self.params, self.show_grid),
                             );
                         });
                         ui.add_space(6.0);
+                        ui.label(egui::RichText::new("Drag: orbit · Shift+drag: pan · Wheel: zoom").weak().small());
                         ui.label(egui::RichText::new(&self.status).weak().small());
                     },
                 );
