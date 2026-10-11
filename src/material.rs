@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fs, path::Path};
 
-pub const PRESET_SCHEMA_VERSION: u32 = 1;
+pub const PRESET_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -12,6 +12,10 @@ pub struct SkinMaterial {
     pub specular: f32,
     pub subsurface: f32,
     pub micro_relief: f32,
+    pub hemoglobin_strength: f32,
+    pub freckle_strength: f32,
+    pub oiliness: f32,
+    pub pigment_variation: f32,
 }
 
 impl Default for SkinMaterial {
@@ -23,6 +27,10 @@ impl Default for SkinMaterial {
             specular: 0.24,
             subsurface: 0.18,
             micro_relief: 0.35,
+            hemoglobin_strength: 0.28,
+            freckle_strength: 0.12,
+            oiliness: 0.22,
+            pigment_variation: 0.35,
         }
     }
 }
@@ -38,6 +46,10 @@ impl SkinMaterial {
         validate_range("specular", self.specular, 0.0, 1.0)?;
         validate_range("subsurface", self.subsurface, 0.0, 0.7)?;
         validate_range("micro_relief", self.micro_relief, 0.0, 1.0)?;
+        validate_range("hemoglobin_strength", self.hemoglobin_strength, 0.0, 1.0)?;
+        validate_range("freckle_strength", self.freckle_strength, 0.0, 1.0)?;
+        validate_range("oiliness", self.oiliness, 0.0, 1.0)?;
+        validate_range("pigment_variation", self.pigment_variation, 0.0, 1.0)?;
         Ok(())
     }
 }
