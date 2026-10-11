@@ -18,8 +18,8 @@ pub struct MeshVertex {
     /// Position normalized only for viewport framing.
     pub position: [f32; 3],
     pub normal: [f32; 3],
-    /// Original object-space position in units of 0.22 metres. The source add-on
-    /// uses this scale so a 145-cell pore pattern remains approximately 1.5 mm.
+    /// Unmodified source object-space position. The shader applies the selected
+    /// real-world units-per-coordinate before evaluating skin detail.
     pub skin_position: [f32; 3],
     /// Bbox-normalized coordinates used by the original add-on's head-region heuristics.
     pub region_position: [f32; 3],
@@ -63,7 +63,7 @@ impl MeshData {
                     position: (normal * 0.82).to_array(),
                     normal: normal.to_array(),
                     // Treat the demo sphere as a head-sized 22 cm surface.
-                    skin_position: (normal * 0.5).to_array(),
+                    skin_position: (normal * 0.11).to_array(),
                     region_position: (normal * 0.5 + Vec3::splat(0.5)).to_array(),
                 });
             }
@@ -139,10 +139,9 @@ impl MeshData {
         let bounds_extent = (max - min).max(Vec3::splat(1.0e-6));
         for vertex in &mut self.vertices {
             let source_position = Vec3::from_array(vertex.position);
-            // Mirror _patch_skin_coordinates(): source object coordinates are
-            // multiplied by metres-per-unit / 0.22 m before the preview framing
-            // transform. The current importer assumes OBJ/glTF coordinates are metres.
-            vertex.skin_position = (source_position / 0.22).to_array();
+            // Keep the original object coordinates independent of preview framing.
+            // WGSL applies the same metres-per-unit / 0.22 m conversion as the addon.
+            vertex.skin_position = source_position.to_array();
             vertex.region_position = ((source_position - min) / bounds_extent).to_array();
             vertex.position = ((source_position - center) * scale).to_array();
         }
