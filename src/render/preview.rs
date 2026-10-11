@@ -22,6 +22,7 @@ const MESH_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 2] =
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct ViewportUniforms {
     view_projection: [[f32; 4]; 4],
+    camera_position: [f32; 4],
     base_color: [f32; 4],
     surface: [f32; 4],
     pigment_detail: [f32; 4],
@@ -268,7 +269,7 @@ impl SkinRenderResources {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
         let display_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -377,14 +378,17 @@ impl OrbitCamera {
         *self = Self::default();
     }
 
-    fn view_projection(&self, aspect: f32) -> Mat4 {
+    fn position(&self) -> Vec3 {
         let direction = Vec3::new(
             self.yaw.sin() * self.pitch.cos(),
             self.pitch.sin(),
             self.yaw.cos() * self.pitch.cos(),
         );
-        let eye = self.target + direction * self.distance;
-        let view = Mat4::look_at_rh(eye, self.target, Vec3::Y);
+        self.target + direction * self.distance
+    }
+
+    fn view_projection(&self, aspect: f32) -> Mat4 {
+        let view = Mat4::look_at_rh(self.position(), self.target, Vec3::Y);
         let projection = Mat4::perspective_rh(45_f32.to_radians(), aspect.max(0.1), 0.01, 100.0);
         projection * view
     }
@@ -494,6 +498,7 @@ impl SkinPreview {
             .view_projection(width as f32 / height.max(1) as f32);
         let uniform = ViewportUniforms {
             view_projection: view_projection.to_cols_array_2d(),
+            camera_position: self.camera.position().extend(1.0).to_array(),
             base_color: [
                 params.base_color[0],
                 params.base_color[1],
