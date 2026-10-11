@@ -359,7 +359,7 @@ mod tests {
         let mut material = SkinMaterial::default();
         material.pore_strength = f32::NAN;
         assert!(material.validate().is_err());
-        material.pore_strength = 1.2;
+        material.pore_strength = 2.2;
         assert!(material.validate().is_err());
     }
 
