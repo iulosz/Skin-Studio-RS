@@ -32,6 +32,14 @@ pub struct SkinMaterial {
     pub micro_grain_strength: f32,
     pub micro_grain_scale: f32,
     pub micro_grain_roughness: f32,
+    pub regional_relief: f32,
+    pub pore_vis_nose: f32,
+    pub pore_vis_cheeks: f32,
+    pub pore_vis_forehead: f32,
+    pub pore_vis_chin: f32,
+    pub pore_vis_ears: f32,
+    pub pore_vis_eye_area: f32,
+    pub pore_vis_neck: f32,
 }
 
 impl Default for SkinMaterial {
@@ -62,6 +70,14 @@ impl Default for SkinMaterial {
             micro_grain_strength: 0.02,
             micro_grain_scale: 320.0,
             micro_grain_roughness: 0.035,
+            regional_relief: 1.0,
+            pore_vis_nose: 1.6,
+            pore_vis_cheeks: 1.0,
+            pore_vis_forehead: 0.55,
+            pore_vis_chin: 1.1,
+            pore_vis_ears: 0.5,
+            pore_vis_eye_area: 0.25,
+            pore_vis_neck: 0.5,
         }
     }
 }
@@ -94,6 +110,14 @@ impl SkinMaterial {
         validate_range("micro_grain_strength", self.micro_grain_strength, 0.0, 0.20)?;
         validate_range("micro_grain_scale", self.micro_grain_scale, 50.0, 1000.0)?;
         validate_range("micro_grain_roughness", self.micro_grain_roughness, 0.0, 0.15)?;
+        validate_range("regional_relief", self.regional_relief, 0.0, 1.0)?;
+        validate_range("pore_vis_nose", self.pore_vis_nose, 0.0, 2.0)?;
+        validate_range("pore_vis_cheeks", self.pore_vis_cheeks, 0.0, 2.0)?;
+        validate_range("pore_vis_forehead", self.pore_vis_forehead, 0.0, 2.0)?;
+        validate_range("pore_vis_chin", self.pore_vis_chin, 0.0, 2.0)?;
+        validate_range("pore_vis_ears", self.pore_vis_ears, 0.0, 2.0)?;
+        validate_range("pore_vis_eye_area", self.pore_vis_eye_area, 0.0, 2.0)?;
+        validate_range("pore_vis_neck", self.pore_vis_neck, 0.0, 2.0)?;
         validate_range("roughness", self.roughness, 0.03, 1.0)?;
         validate_range("specular", self.specular, 0.0, 1.0)?;
         validate_range("subsurface", self.subsurface, 0.0, 0.7)?;
