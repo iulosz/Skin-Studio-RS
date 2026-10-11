@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fs, path::Path};
 
-pub const PRESET_SCHEMA_VERSION: u32 = 3;
+pub const PRESET_SCHEMA_VERSION: u32 = 4;
 
 /// Real-world length used by the source add-on's Coord Scale conversion.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -35,7 +35,7 @@ impl CoordinateUnit {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(default, deny_unknown_fields)]
 pub struct SkinMaterial {
     pub base_color: [f32; 3],
     pub pore_strength: f32,
@@ -323,6 +323,17 @@ impl SkinPreset {
                     material: old.material.into(),
                 }
             }
+            3 => {
+                // Schema 3 introduced the pore subsystem. Schema 4 adds physical
+                // coordinate units, so old schema-3 presets inherit meter units.
+                let old: SkinPreset =
+                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                Self {
+                    schema_version: PRESET_SCHEMA_VERSION,
+                    name: old.name,
+                    material: old.material,
+                }
+            }
             PRESET_SCHEMA_VERSION => serde_json::from_str(source).map_err(PresetError::Json)?,
             version => return Err(PresetError::UnsupportedVersion(version)),
         };
@@ -438,6 +449,21 @@ mod tests {
         assert_eq!(migrated.material.pore_micro_scale, 145.0);
         assert_eq!(migrated.material.pore_map_resolution, 1024);
         assert_eq!(migrated.material.pore_seed, 42);
+    }
+
+    #[test]
+    fn migrates_v3_presets_to_meter_coordinate_units() {
+        let mut material = SkinMaterial::default();
+        material.coord_unit = CoordinateUnit::Centimeter;
+        let v3 = SkinPreset::new("Schema 3", material).unwrap();
+        let mut json = v3.to_json_pretty().unwrap();
+        json = json.replace("\"schema_version\": 4", "\"schema_version\": 3");
+        json = json.replace(",\n    \"coord_unit\": \"centimeter\"", "");
+        json = json.replace(",\n    \"coord_custom_meters_per_unit\": 1.0", "");
+        let migrated = SkinPreset::from_json(&json).unwrap();
+        assert_eq!(migrated.schema_version, PRESET_SCHEMA_VERSION);
+        assert_eq!(migrated.material.coord_unit, CoordinateUnit::Meter);
+        assert_eq!(migrated.material.coord_custom_meters_per_unit, 1.0);
     }
 
     #[test]
