@@ -1,3 +1,3 @@
 mod preview;
 
-pub use preview::{SkinPreview, SkinPreviewParams};
+pub use preview::SkinPreview;
