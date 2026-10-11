@@ -2,6 +2,7 @@ mod app;
 mod geometry;
 mod material;
 mod render;
+mod skin_detail;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
