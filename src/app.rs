@@ -2,6 +2,7 @@ use eframe::egui;
 use crate::{
     material::{SkinMaterial, SkinPreset, load_preset, save_preset},
     render::SkinPreview,
+    skin_detail::PoreMapSettings,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +85,26 @@ impl SkinStudioApp {
                 self.status = format!("Preset loaded: {}", self.preset_path);
             }
             Err(error) => self.status = format!("Preset load failed: {error}"),
+        }
+    }
+
+    fn regenerate_pore_map(&mut self) {
+        let settings = PoreMapSettings {
+            resolution: self.params.pore_map_resolution,
+            density: self.params.pore_map_density,
+            relief: self.params.pore_map_relief,
+            seed: self.params.pore_seed,
+        };
+        match self.preview.regenerate_pore_map(settings) {
+            Ok(()) => {
+                self.status = format!(
+                    "Pore height map regenerated · {} px · density {:.1} · seed {}",
+                    settings.resolution, settings.density, settings.seed
+                );
+            }
+            Err(error) => {
+                self.status = format!("Pore height map failed: {error}");
+            }
         }
     }
 
@@ -190,20 +211,123 @@ impl SkinStudioApp {
                 ui.label("These controls update the GPU preview immediately. Regional anatomy and calibrated pigment layers are not implemented yet.");
             }
             StudioTab::Detail => {
-                ui.label(egui::RichText::new("Surface detail").strong());
+                ui.label(egui::RichText::new("Layered pore system").strong());
                 ui.add(
-                    egui::Slider::new(&mut self.params.pore_strength, 0.0..=1.0)
-                        .text("Pore intensity"),
+                    egui::Slider::new(&mut self.params.pore_strength, 0.0..=2.0)
+                        .text("Pore strength"),
                 );
                 ui.add(
-                    egui::Slider::new(&mut self.params.micro_relief, 0.0..=1.0)
-                        .text("Micro-relief"),
+                    egui::Slider::new(&mut self.params.pore_scale, 0.25..=4.0)
+                        .text("Pore pattern scale"),
                 );
                 ui.add(
-                    egui::Slider::new(&mut self.params.freckle_strength, 0.0..=1.0)
-                        .text("Freckles"),
+                    egui::Slider::new(&mut self.params.pore_color_strength, 0.0..=1.0)
+                        .text("Pore color"),
                 );
-                ui.label("Procedural detail is a preview approximation, not a scanned anatomical skin texture.");
+                ui.add(
+                    egui::Slider::new(&mut self.params.pore_micro_detail, 0.0..=1.0)
+                        .text("Pore micro detail"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.pore_micro_scale, 40.0..=320.0)
+                        .text("Pore micro scale"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.pore_irregularity, 0.0..=1.0)
+                        .text("Pore irregularity"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.pore_size_variation, 0.0..=1.0)
+                        .text("Pore size variation"),
+                );
+
+                ui.separator();
+                ui.label(egui::RichText::new("Tileable pore height map").strong());
+                ui.add(
+                    egui::Slider::new(&mut self.params.pore_map_resolution, 256..=4096)
+                        .text("Resolution"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.pore_map_density, 5.0..=100.0)
+                        .text("Density"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.pore_map_relief, 0.5..=10.0)
+                        .text("Height-map relief"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.pore_seed, 0..=999_999)
+                        .text("Seed"),
+                );
+                if ui.button("Generate Pore Map").clicked() {
+                    self.regenerate_pore_map();
+                }
+
+                ui.separator();
+                ui.label(egui::RichText::new("Fine surface detail").strong());
+                ui.add(
+                    egui::Slider::new(&mut self.params.fine_detail_strength, 0.0..=0.5)
+                        .text("Fine detail strength"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.fine_detail_scale, 10.0..=500.0)
+                        .text("Fine detail scale"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.micro_grain_strength, 0.0..=0.20)
+                        .text("Micro grain strength"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.micro_grain_scale, 50.0..=1000.0)
+                        .text("Micro grain scale"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.micro_grain_roughness, 0.0..=0.15)
+                        .text("Micro grain roughness"),
+                );
+
+                ui.collapsing("Regional pore distribution", |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut self.params.regional_relief, 0.0..=1.0)
+                            .text("Regional relief"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.params.pore_vis_nose, 0.0..=2.0)
+                            .text("Nose"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.params.pore_vis_cheeks, 0.0..=2.0)
+                            .text("Cheeks"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.params.pore_vis_forehead, 0.0..=2.0)
+                            .text("Forehead"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.params.pore_vis_chin, 0.0..=2.0)
+                            .text("Chin"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.params.pore_vis_ears, 0.0..=2.0)
+                            .text("Ears"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.params.pore_vis_eye_area, 0.0..=2.0)
+                            .text("Eye area"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.params.pore_vis_neck, 0.0..=2.0)
+                            .text("Neck"),
+                    );
+                    ui.label(
+                        egui::RichText::new(
+                            "Approximate masks use bbox coordinates and assume a centered head facing -Y. They are not a substitute for painted anatomical masks.",
+                        )
+                        .weak()
+                        .small(),
+                    );
+                });
+                ui.label("Ported from Skin Studio 2.4.76: three Voronoi pore populations, domain warp, generated tileable height, separate fine bump and micro grain.");
             }
             StudioTab::Reference => {
                 ui.label("Reference-driven Skin Line Network");
