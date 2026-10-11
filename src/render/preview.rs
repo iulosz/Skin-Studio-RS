@@ -879,7 +879,6 @@ mod tests {
         camera.zoom(-100_000.0);
         assert!(camera.distance <= 30.0);
     }
-}
 
     #[test]
     fn mesh_shader_parses_and_validates_as_wgsl() {
