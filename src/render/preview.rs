@@ -17,8 +17,8 @@ const MESH_SHADER: &str = include_str!("mesh_preview.wgsl");
 const GRID_SHADER: &str = include_str!("grid.wgsl");
 const DISPLAY_SHADER: &str = include_str!("display.wgsl");
 
-const MESH_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
-    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3];
+const MESH_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3, 3 => Float32x3];
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -31,6 +31,8 @@ struct ViewportUniforms {
     pore_controls: [f32; 4],
     pore_variation: [f32; 4],
     grain_controls: [f32; 4],
+    regional_a: [f32; 4],
+    regional_b: [f32; 4],
 }
 
 struct GpuMesh {
@@ -392,21 +394,25 @@ fn make_grid_vertices() -> Vec<MeshVertex> {
             position: [offset, floor_y, -half],
             normal: [0.0; 3],
             skin_position: [offset, floor_y, -half],
+            region_position: [0.0; 3],
         });
         vertices.push(MeshVertex {
             position: [offset, floor_y, half],
             normal: [0.0; 3],
             skin_position: [offset, floor_y, half],
+            region_position: [0.0; 3],
         });
         vertices.push(MeshVertex {
             position: [-half, floor_y, offset],
             normal: [0.0; 3],
             skin_position: [-half, floor_y, offset],
+            region_position: [0.0; 3],
         });
         vertices.push(MeshVertex {
             position: [half, floor_y, offset],
             normal: [0.0; 3],
             skin_position: [half, floor_y, offset],
+            region_position: [0.0; 3],
         });
     }
     vertices
@@ -609,6 +615,18 @@ impl SkinPreview {
                 params.micro_grain_scale,
                 params.micro_grain_roughness,
                 params.micro_relief,
+            ],
+            regional_a: [
+                params.regional_relief,
+                params.pore_vis_nose,
+                params.pore_vis_cheeks,
+                params.pore_vis_forehead,
+            ],
+            regional_b: [
+                params.pore_vis_chin,
+                params.pore_vis_ears,
+                params.pore_vis_eye_area,
+                params.pore_vis_neck,
             ],
         };
 
