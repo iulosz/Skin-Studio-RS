@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fs, path::Path};
 
-pub const PRESET_SCHEMA_VERSION: u32 = 2;
+pub const PRESET_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -16,13 +16,29 @@ pub struct SkinMaterial {
     pub freckle_strength: f32,
     pub oiliness: f32,
     pub pigment_variation: f32,
+    /// Master amplitude for both the tileable image relief and procedural pore populations.
+    pub pore_scale: f32,
+    pub pore_color_strength: f32,
+    pub pore_micro_detail: f32,
+    pub pore_micro_scale: f32,
+    pub pore_irregularity: f32,
+    pub pore_size_variation: f32,
+    pub pore_map_resolution: u32,
+    pub pore_map_density: f32,
+    pub pore_map_relief: f32,
+    pub pore_seed: u32,
+    pub fine_detail_strength: f32,
+    pub fine_detail_scale: f32,
+    pub micro_grain_strength: f32,
+    pub micro_grain_scale: f32,
+    pub micro_grain_roughness: f32,
 }
 
 impl Default for SkinMaterial {
     fn default() -> Self {
         Self {
             base_color: [0.68, 0.43, 0.33],
-            pore_strength: 0.42,
+            pore_strength: 1.0,
             roughness: 0.58,
             specular: 0.24,
             subsurface: 0.18,
@@ -31,6 +47,21 @@ impl Default for SkinMaterial {
             freckle_strength: 0.12,
             oiliness: 0.22,
             pigment_variation: 0.35,
+            pore_scale: 1.0,
+            pore_color_strength: 0.15,
+            pore_micro_detail: 0.38,
+            pore_micro_scale: 145.0,
+            pore_irregularity: 0.70,
+            pore_size_variation: 0.65,
+            pore_map_resolution: 1024,
+            pore_map_density: 35.0,
+            pore_map_relief: 4.0,
+            pore_seed: 42,
+            fine_detail_strength: 0.02,
+            fine_detail_scale: 180.0,
+            micro_grain_strength: 0.02,
+            micro_grain_scale: 320.0,
+            micro_grain_roughness: 0.035,
         }
     }
 }
@@ -41,7 +72,28 @@ impl SkinMaterial {
         for (index, value) in self.base_color.iter().enumerate() {
             validate_range(&format!("base_color[{index}]"), *value, 0.0, 1.0)?;
         }
-        validate_range("pore_strength", self.pore_strength, 0.0, 1.0)?;
+        validate_range("pore_strength", self.pore_strength, 0.0, 2.0)?;
+        validate_range("pore_scale", self.pore_scale, 0.25, 4.0)?;
+        validate_range("pore_color_strength", self.pore_color_strength, 0.0, 1.0)?;
+        validate_range("pore_micro_detail", self.pore_micro_detail, 0.0, 1.0)?;
+        validate_range("pore_micro_scale", self.pore_micro_scale, 40.0, 320.0)?;
+        validate_range("pore_irregularity", self.pore_irregularity, 0.0, 1.0)?;
+        validate_range("pore_size_variation", self.pore_size_variation, 0.0, 1.0)?;
+        if !(256..=4096).contains(&self.pore_map_resolution) {
+            return Err(PresetError::InvalidParameter {
+                name: "pore_map_resolution".to_owned(),
+                value: self.pore_map_resolution as f32,
+                min: 256.0,
+                max: 4096.0,
+            });
+        }
+        validate_range("pore_map_density", self.pore_map_density, 5.0, 100.0)?;
+        validate_range("pore_map_relief", self.pore_map_relief, 0.5, 10.0)?;
+        validate_range("fine_detail_strength", self.fine_detail_strength, 0.0, 0.5)?;
+        validate_range("fine_detail_scale", self.fine_detail_scale, 10.0, 500.0)?;
+        validate_range("micro_grain_strength", self.micro_grain_strength, 0.0, 0.20)?;
+        validate_range("micro_grain_scale", self.micro_grain_scale, 50.0, 1000.0)?;
+        validate_range("micro_grain_roughness", self.micro_grain_roughness, 0.0, 0.15)?;
         validate_range("roughness", self.roughness, 0.03, 1.0)?;
         validate_range("specular", self.specular, 0.0, 1.0)?;
         validate_range("subsurface", self.subsurface, 0.0, 0.7)?;
@@ -112,6 +164,48 @@ struct SkinPresetV1 {
     material: SkinMaterialV1,
 }
 
+/// Exact schema retained by the first standalone Rust prototype (preset version 2).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SkinMaterialV2 {
+    base_color: [f32; 3],
+    pore_strength: f32,
+    roughness: f32,
+    specular: f32,
+    subsurface: f32,
+    micro_relief: f32,
+    hemoglobin_strength: f32,
+    freckle_strength: f32,
+    oiliness: f32,
+    pigment_variation: f32,
+}
+
+impl From<SkinMaterialV2> for SkinMaterial {
+    fn from(old: SkinMaterialV2) -> Self {
+        Self {
+            base_color: old.base_color,
+            pore_strength: old.pore_strength,
+            roughness: old.roughness,
+            specular: old.specular,
+            subsurface: old.subsurface,
+            micro_relief: old.micro_relief,
+            hemoglobin_strength: old.hemoglobin_strength,
+            freckle_strength: old.freckle_strength,
+            oiliness: old.oiliness,
+            pigment_variation: old.pigment_variation,
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SkinPresetV2 {
+    schema_version: u32,
+    name: String,
+    material: SkinMaterialV2,
+}
+
 impl SkinPreset {
     pub fn new(name: impl Into<String>, material: SkinMaterial) -> Result<Self, PresetError> {
         let preset = Self {
@@ -151,9 +245,17 @@ impl SkinPreset {
                     material: old.material.into(),
                 }
             }
-            PRESET_SCHEMA_VERSION => {
-                serde_json::from_str(source).map_err(PresetError::Json)?
+            2 => {
+                let old: SkinPresetV2 =
+                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                debug_assert_eq!(old.schema_version, 2);
+                Self {
+                    schema_version: PRESET_SCHEMA_VERSION,
+                    name: old.name,
+                    material: old.material.into(),
+                }
             }
+            PRESET_SCHEMA_VERSION => serde_json::from_str(source).map_err(PresetError::Json)?,
             version => return Err(PresetError::UnsupportedVersion(version)),
         };
         preset.validate()?;
@@ -220,6 +322,7 @@ mod tests {
         let material = SkinMaterial {
             base_color: [0.2, 0.45, 0.7],
             roughness: 0.72,
+            pore_scale: 1.25,
             ..SkinMaterial::default()
         };
         let preset = SkinPreset::new("Test skin", material).unwrap();
@@ -256,6 +359,17 @@ mod tests {
         material.oiliness = 0.5;
         material.freckle_strength = f32::NAN;
         assert!(material.validate().is_err());
+    }
+
+    #[test]
+    fn migrates_v2_presets_and_initializes_original_pore_controls() {
+        let json = r#"{"schema_version":2,"name":"Legacy v2","material":{"base_color":[0.5,0.3,0.24],"pore_strength":0.42,"roughness":0.58,"specular":0.24,"subsurface":0.18,"micro_relief":0.35,"hemoglobin_strength":0.28,"freckle_strength":0.12,"oiliness":0.22,"pigment_variation":0.35}}"#;
+        let migrated = SkinPreset::from_json(json).unwrap();
+        assert_eq!(migrated.schema_version, PRESET_SCHEMA_VERSION);
+        assert_eq!(migrated.material.pore_strength, 0.42);
+        assert_eq!(migrated.material.pore_micro_scale, 145.0);
+        assert_eq!(migrated.material.pore_map_resolution, 1024);
+        assert_eq!(migrated.material.pore_seed, 42);
     }
 
     #[test]
