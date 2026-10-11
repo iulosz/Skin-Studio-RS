@@ -2,6 +2,7 @@ struct PreviewUniforms {
     viewport: vec4<f32>,
     color_pores: vec4<f32>,
     surface: vec4<f32>,
+    pigment_detail: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -55,8 +56,21 @@ fn fs_main(@builtin(position) frag_position: vec4<f32>) -> @location(0) vec4<f32
     let coarse_cells = floor(normal * 42.0);
     let pore_cells = floor(normal * 175.0);
     let broad_variation = hash3(coarse_cells) - 0.5;
+    let fine_variation = hash3(floor(normal * 97.0)) - 0.5;
     let pore_noise = hash3(pore_cells);
     let pores = smoothstep(0.72, 0.96, pore_noise) * u.color_pores.w;
+
+    // Sparse procedural dots for look-development freckles.
+    let freckle_cell = floor(normal * 46.0);
+    let freckle_local = fract(normal * 46.0);
+    let freckle_center = vec3<f32>(
+        hash3(freckle_cell + vec3<f32>(11.0, 3.0, 7.0)),
+        hash3(freckle_cell + vec3<f32>(5.0, 17.0, 13.0)),
+        hash3(freckle_cell + vec3<f32>(19.0, 23.0, 29.0))
+    );
+    let freckle_gate = step(0.955, hash3(freckle_cell + vec3<f32>(31.0, 37.0, 41.0)));
+    let freckle_disk = 1.0 - smoothstep(0.065, 0.14, length(freckle_local - freckle_center));
+    let freckles = freckle_gate * freckle_disk * u.pigment_detail.y;
 
     let micro_wave = vec3<f32>(
         sin(normal.y * 287.0 + normal.z * 83.0),
@@ -67,15 +81,26 @@ fn fs_main(@builtin(position) frag_position: vec4<f32>) -> @location(0) vec4<f32
 
     let ndotl = max(dot(normal, light_direction), 0.0);
     let diffuse = 0.25 + ndotl * 0.75;
-    let roughness = clamp(u.surface.x, 0.035, 1.0);
+    let oiliness = clamp(u.pigment_detail.z, 0.0, 1.0);
+    let roughness = clamp(mix(u.surface.x, u.surface.x * 0.42, oiliness), 0.035, 1.0);
     let specular_power = mix(180.0, 5.0, roughness);
     let half_vector = normalize(light_direction + view_direction);
-    let specular = pow(max(dot(normal, half_vector), 0.0), specular_power) * u.surface.y;
+    let specular_strength = clamp(u.surface.y + oiliness * 0.35, 0.0, 1.0);
+    let specular = pow(max(dot(normal, half_vector), 0.0), specular_power) * specular_strength;
     let back_scatter = pow(max(dot(-normal, light_direction), 0.0), 2.0) * u.surface.z;
 
-    var pigment = 1.0 + broad_variation * 0.09;
+    let variation = clamp(u.pigment_detail.w, 0.0, 1.0);
+    var pigment = 1.0 + broad_variation * (0.04 + variation * 0.15);
+    pigment += fine_variation * variation * 0.025;
     pigment = pigment - pores * 0.10;
-    let base = clamp(u.color_pores.rgb * pigment, vec3<f32>(0.0), vec3<f32>(1.0));
+    var base = clamp(u.color_pores.rgb * pigment, vec3<f32>(0.0), vec3<f32>(1.0));
+
+    let blood_noise = hash3(floor(normal * 23.0));
+    let hemoglobin_mask = 0.35 + 0.65 * blood_noise;
+    let hemoglobin_tint = base * vec3<f32>(1.10, 0.76, 0.72);
+    base = mix(base, hemoglobin_tint, clamp(u.pigment_detail.x * hemoglobin_mask * 0.22, 0.0, 1.0));
+    base *= 1.0 - freckles * 0.38;
+
     var color = base * diffuse;
     color += base * back_scatter * vec3<f32>(1.0, 0.48, 0.30);
     color += vec3<f32>(1.0, 0.78, 0.63) * specular;
