@@ -2,7 +2,7 @@
 
 ## Princípio
 
-O projeto não chama `bpy`, não abre o Blender e não usa Cycles/Eevee. `wgpu` é a abstração de baixo nível da GPU; a lógica de renderização do material de pele pertence ao projeto (`src/render/skin_preview.wgsl`). O primeiro preview usa um raio por pixel para intersectar uma esfera procedural, permitindo iterar rapidamente em pigmentação e resposta da superfície.
+O projeto não chama `bpy`, não abre o Blender e não usa Cycles/Eevee. `wgpu` é a abstração de baixo nível da GPU; os shaders próprios do projeto compõem a visualização do material. O viewport atual rasteriza uma malha triangular no alvo offscreen com teste de profundidade e depois compõe esse alvo na interface. Uma esfera triangulada serve como modelo padrão; OBJ e glTF/GLB podem ser importados pelo seletor de arquivos.
 
 ## Camadas previstas
 
@@ -18,8 +18,8 @@ skin-studio-rs/
 
 ## Renderizador: etapas
 
-1. **Preview procedural** (implementado): ray/sphere por pixel, iluminação difusa, especular, variação de pigmento, hemoglobina aproximada, sardas procedurais e detalhe de poros.
-2. **Malhas reais**: importação de glTF/OBJ, buffers de vértices/índices, câmera orbital, depth buffer e desenho de triângulos.
+1. **Viewport rasterizado** (implementado): malhas triangulares, alvo de profundidade, câmera orbital, grade, shader de pele aproximado e normalização de modelos importados.
+2. **Malhas reais** (base implementada): importação de glTF/GLB e OBJ, buffers de vértices/índices, normais, câmera orbital e depth buffer. Tangentes, seleção de múltiplos objetos e materiais por primitiva continuam pendentes.
 3. **Material PBR**: fluxo de Base Color/Roughness/Normal, gestão explícita de espaço de cor, fontes de luz e tone mapping.
 4. **Pele**: pigmentos em múltiplas escalas, máscaras anatômicas, poros por região, rugas, vasos, sardas, lábios e o modelo SSS escolhido.
 5. **Baker independente**: UVs, padding/margem, Base Color, Normal tangencial e Roughness. Alpha poderá ser incluído quando o formato de geometria/material e o caso de uso forem definidos.
