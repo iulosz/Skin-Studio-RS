@@ -349,6 +349,10 @@ impl SkinStudioApp {
                         .text("Oiliness"),
                 );
                 ui.add(
+                    egui::Slider::new(&mut self.params.spec_pore_occlusion, 0.0..=1.0)
+                        .text("Pore specular occlusion"),
+                );
+                ui.add(
                     egui::Slider::new(&mut self.params.subsurface, 0.0..=0.7)
                         .text("Subsurface (preview)"),
                 );
