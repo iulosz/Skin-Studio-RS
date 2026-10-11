@@ -17,6 +17,8 @@ struct PreviewUniforms {
     color_pores: [f32; 4],
     // roughness, specular, subsurface approximation, micro-relief
     surface: [f32; 4],
+    // hemoglobin tint, freckle strength, oiliness and pigment variation
+    pigment_detail: [f32; 4],
 }
 
 struct SkinRenderResources {
@@ -154,6 +156,12 @@ impl SkinPreview {
                 params.specular,
                 params.subsurface,
                 params.micro_relief,
+            ],
+            pigment_detail: [
+                params.hemoglobin_strength,
+                params.freckle_strength,
+                params.oiliness,
+                params.pigment_variation,
             ],
         };
 

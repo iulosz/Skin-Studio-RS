@@ -12,6 +12,12 @@ Aplicativo desktop independente em Rust, criado para reconstruir gradualmente os
 
 **Ainda não é a conversão completa do addon.** Importação de malhas, shader anatômico equivalente, máscaras regionais e exportação de texturas ainda serão desenvolvidos. O parâmetro de viewport grid é apenas um item de interface neste protótipo.
 
+## Editor de pele — primeira etapa
+
+O painel de propriedades expõe controles para Base Color, tonalidade aproximada de hemoglobina, variação de pigmentação, poros, micro-relevo, sardas, rugosidade, especular, oleosidade e subsurface. Os ajustes são enviados em tempo real ao shader WGSL da pré-visualização.
+
+Os parâmetros são salvos em presets JSON versão 2. Presets versão 1 são migrados automaticamente, preservando os valores antigos e preenchendo os parâmetros novos com padrões seguros. Hemoglobina e sardas são efeitos procedurais de look development; ainda não representam máscaras anatômicas ou texturas calibradas.
+
 ## Tecnologias
 
 - Rust stable (a versão atual do `eframe` requer Rust 1.95 ou superior).

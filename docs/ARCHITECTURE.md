@@ -10,7 +10,7 @@ O projeto não chama `bpy`, não abre o Blender e não usa Cycles/Eevee. `wgpu` 
 skin-studio-rs/
 ├── src/app.rs               # estado e interface do estúdio
 ├── src/render/               # renderização GPU e shaders WGSL
-├── src/material/             # parâmetros e presets (próxima etapa)
+├── src/material.rs           # parâmetros tipados e presets versionados
 ├── src/geometry/             # malhas, normais, UVs e importação (próxima etapa)
 ├── src/texture/              # imagens e bake de mapas (próxima etapa)
 └── .github/workflows/        # testes e build multiplataforma
@@ -18,7 +18,7 @@ skin-studio-rs/
 
 ## Renderizador: etapas
 
-1. **Preview procedural** (implementado): ray/sphere por pixel, iluminação difusa, especular, variação procedural e detalhe de poros aproximado.
+1. **Preview procedural** (implementado): ray/sphere por pixel, iluminação difusa, especular, variação de pigmento, hemoglobina aproximada, sardas procedurais e detalhe de poros.
 2. **Malhas reais**: importação de glTF/OBJ, buffers de vértices/índices, câmera orbital, depth buffer e desenho de triângulos.
 3. **Material PBR**: fluxo de Base Color/Roughness/Normal, gestão explícita de espaço de cor, fontes de luz e tone mapping.
 4. **Pele**: pigmentos em múltiplas escalas, máscaras anatômicas, poros por região, rugas, vasos, sardas, lábios e o modelo SSS escolhido.

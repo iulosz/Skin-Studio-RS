@@ -9,10 +9,17 @@
 - [ ] Executar o primeiro build no runner do GitHub e corrigir qualquer incompatibilidade de toolchain/driver que surgir.
 
 ## M1 — Dados, presets e estabilidade
-- [ ] Estruturas Rust tipadas para parâmetros de material.
-- [ ] Serialização de presets em JSON/RON, com versionamento.
-- [ ] Configuração e histórico de alterações.
-- [ ] Testes unitários para faixas válidas, defaults e migração de preset.
+- [x] Estruturas Rust tipadas para parâmetros de material.
+- [x] Serialização de presets JSON com versionamento.
+- [x] Presets versão 1 migrados automaticamente para o esquema atual.
+- [x] Testes unitários para faixas válidas, defaults e migração de preset.
+
+## M1.5 — Editor inicial de parâmetros de pele
+- [x] Controles para Base Color, hemoglobina aproximada e variação de pigmentação.
+- [x] Controles de poros, micro-relevo e sardas procedurais.
+- [x] Controles de roughness, especular, oleosidade e subsurface aproximado.
+- [x] Parâmetros ligados em tempo real ao shader de pré-visualização WGSL.
+- [ ] Validar visualmente no build Windows e refinar a resposta dos controles.
 
 ## M2 — Malhas e viewport 3D
 - [ ] Importar glTF/GLB e OBJ.
