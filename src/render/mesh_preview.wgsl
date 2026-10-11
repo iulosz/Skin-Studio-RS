@@ -92,6 +92,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let fresnel = pow(1.0 - max(dot(perturbed_normal, view_direction), 0.0), 3.0);
     color += base * fresnel * 0.055;
     color = color / (vec3<f32>(1.0) + max(color, vec3<f32>(0.0)) * 0.22);
-    color = pow(max(color, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.2));
+    // The sRGB render target performs the display transfer automatically.
     return vec4<f32>(color, 1.0);
 }
