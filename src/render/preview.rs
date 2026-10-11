@@ -33,6 +33,7 @@ struct ViewportUniforms {
     grain_controls: [f32; 4],
     regional_a: [f32; 4],
     regional_b: [f32; 4],
+    optical_controls: [f32; 4],
 }
 
 struct GpuMesh {
@@ -628,6 +629,7 @@ impl SkinPreview {
                 params.pore_vis_eye_area,
                 params.pore_vis_neck,
             ],
+            optical_controls: [params.spec_pore_occlusion, 0.0, 0.0, 0.0],
         };
 
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
