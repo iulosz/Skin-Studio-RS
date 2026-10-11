@@ -610,6 +610,7 @@ impl eframe::egui_wgpu::CallbackTrait for MeshPreviewCallback {
             label: Some("Skin Studio 3D mesh viewport pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: &target.color_view,
+                depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -631,6 +632,7 @@ impl eframe::egui_wgpu::CallbackTrait for MeshPreviewCallback {
             }),
             timestamp_writes: None,
             occlusion_query_set: None,
+            multiview_mask: None,
         });
 
         render_pass.set_bind_group(0, &resources.uniform_bind_group, &[]);
