@@ -40,6 +40,7 @@ pub struct SkinMaterial {
     pub pore_vis_ears: f32,
     pub pore_vis_eye_area: f32,
     pub pore_vis_neck: f32,
+    pub spec_pore_occlusion: f32,
 }
 
 impl Default for SkinMaterial {
@@ -78,6 +79,7 @@ impl Default for SkinMaterial {
             pore_vis_ears: 0.5,
             pore_vis_eye_area: 0.25,
             pore_vis_neck: 0.5,
+            spec_pore_occlusion: 0.55,
         }
     }
 }
@@ -118,6 +120,7 @@ impl SkinMaterial {
         validate_range("pore_vis_ears", self.pore_vis_ears, 0.0, 2.0)?;
         validate_range("pore_vis_eye_area", self.pore_vis_eye_area, 0.0, 2.0)?;
         validate_range("pore_vis_neck", self.pore_vis_neck, 0.0, 2.0)?;
+        validate_range("spec_pore_occlusion", self.spec_pore_occlusion, 0.0, 1.0)?;
         validate_range("roughness", self.roughness, 0.03, 1.0)?;
         validate_range("specular", self.specular, 0.0, 1.0)?;
         validate_range("subsurface", self.subsurface, 0.0, 0.7)?;
