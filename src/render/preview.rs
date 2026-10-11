@@ -222,7 +222,7 @@ impl SkinRenderResources {
             fragment: Some(wgpu::FragmentState {
                 module: &grid_shader,
                 entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
+                targets: &[Some(wgpu::TextureFormat::Rgba8UnormSrgb.into())],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
             primitive: wgpu::PrimitiveState {
