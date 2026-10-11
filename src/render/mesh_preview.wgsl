@@ -30,7 +30,10 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 }
 
 fn hash3(p: vec3<f32>) -> f32 {
-    return fract(sin(dot(p, vec3<f32>(127.1, 311.7, 74.7))) * 43758.5453);
+    // Trigonometry-free hash keeps the procedural preview affordable per pixel.
+    var p3 = fract(p * vec3<f32>(0.1031, 0.1030, 0.0973));
+    p3 += vec3<f32>(dot(p3, p3.yzx + vec3<f32>(33.33)));
+    return fract((p3.x + p3.y) * p3.z);
 }
 
 // Trilinear interpolation removes the hard square boundaries caused by hashing
@@ -66,10 +69,16 @@ fn pore_field(position: vec3<f32>) -> vec4<f32> {
     var nearest = 2.0;
     var nearest_delta = vec3<f32>(0.0, 0.0, 0.0);
 
-    for (var z = -1; z <= 1; z = z + 1) {
-        for (var y = -1; y <= 1; y = y + 1) {
-            for (var x = -1; x <= 1; x = x + 1) {
-                let neighbor = vec3<f32>(f32(x), f32(y), f32(z));
+    // Only the current cell and the adjacent cell on the point's side can
+    // contain the nearest feature when jitter is bounded to [0.18, 0.82].
+    for (var z = 0; z <= 1; z = z + 1) {
+        for (var y = 0; y <= 1; y = y + 1) {
+            for (var x = 0; x <= 1; x = x + 1) {
+                let neighbor = vec3<f32>(
+                    select(0.0, select(-1.0, 1.0, local.x >= 0.5), x == 1),
+                    select(0.0, select(-1.0, 1.0, local.y >= 0.5), y == 1),
+                    select(0.0, select(-1.0, 1.0, local.z >= 0.5), z == 1)
+                );
                 let feature_cell = cell + neighbor;
                 let jitter = vec3<f32>(
                     hash3(feature_cell + vec3<f32>(17.0, 53.0, 11.0)),
@@ -100,7 +109,6 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // signals transition continuously across the surface.
     let broad_variation = value_noise3(input.world_position * 10.0) - 0.5;
     let fine_variation = value_noise3(input.world_position * 68.0) - 0.5;
-    let grain_variation = value_noise3(input.world_position * 185.0) - 0.5;
 
     let pore_info = pore_field(input.world_position);
     let pore_distance = pore_info.x;
@@ -126,7 +134,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // Fine stochastic grain contributes weakly to albedo, while pore relief
     // gives the strongest close-up cue. No extra mesh tessellation is needed.
     let micro_relief = clamp(u.surface.w, 0.0, 1.0);
-    let grain = grain_variation * micro_relief * 0.045;
+    let grain = fine_variation * micro_relief * 0.045;
     let perturbed_normal = normalize(normal - pore_bump);
 
     let ndotl = max(dot(perturbed_normal, light_direction), 0.0);
