@@ -146,16 +146,35 @@ impl SkinStudioApp {
                 ui.label("Initial preview primitive: procedural sphere.");
             }
             StudioTab::Color => {
-                ui.label("Base pigmentation");
+                ui.label(egui::RichText::new("Base pigmentation").strong());
                 ui.color_edit_button_rgb(&mut self.params.base_color);
                 ui.add_space(8.0);
-                ui.label("RGB channels can be tuned through the color picker.");
-                ui.label("Regional masks and layered pigmentation are part of the porting roadmap.");
+                ui.add(
+                    egui::Slider::new(&mut self.params.hemoglobin_strength, 0.0..=1.0)
+                        .text("Hemoglobin tint"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.pigment_variation, 0.0..=1.0)
+                        .text("Pigment variation"),
+                );
+                ui.add_space(6.0);
+                ui.label("These controls update the GPU preview immediately. Regional anatomy and calibrated pigment layers are not implemented yet.");
             }
             StudioTab::Detail => {
-                ui.add(egui::Slider::new(&mut self.params.pore_strength, 0.0..=1.0).text("Pore intensity"));
-                ui.add(egui::Slider::new(&mut self.params.micro_relief, 0.0..=1.0).text("Micro-relief"));
-                ui.label("Current preview uses procedural GPU noise. Anatomical regional masks are not ported yet.");
+                ui.label(egui::RichText::new("Surface detail").strong());
+                ui.add(
+                    egui::Slider::new(&mut self.params.pore_strength, 0.0..=1.0)
+                        .text("Pore intensity"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.micro_relief, 0.0..=1.0)
+                        .text("Micro-relief"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.freckle_strength, 0.0..=1.0)
+                        .text("Freckles"),
+                );
+                ui.label("Procedural detail is a preview approximation, not a scanned anatomical skin texture.");
             }
             StudioTab::Reference => {
                 ui.label("Reference-driven Skin Line Network");
@@ -163,10 +182,24 @@ impl SkinStudioApp {
                 ui.label("The original reference-height generator and its calibration will be reimplemented as a separate Rust module.");
             }
             StudioTab::Surface => {
-                ui.add(egui::Slider::new(&mut self.params.roughness, 0.03..=1.0).text("Roughness"));
-                ui.add(egui::Slider::new(&mut self.params.specular, 0.0..=1.0).text("Specular"));
-                ui.add(egui::Slider::new(&mut self.params.subsurface, 0.0..=0.7).text("Subsurface (preview)"));
-                ui.label("SSS is currently an inexpensive screen-space approximation, not production-quality diffusion.");
+                ui.label(egui::RichText::new("Surface response").strong());
+                ui.add(
+                    egui::Slider::new(&mut self.params.roughness, 0.03..=1.0)
+                        .text("Roughness"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.specular, 0.0..=1.0)
+                        .text("Specular"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.oiliness, 0.0..=1.0)
+                        .text("Oiliness"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.subsurface, 0.0..=0.7)
+                        .text("Subsurface (preview)"),
+                );
+                ui.label("Oiliness adjusts highlight strength and effective roughness. Subsurface remains an inexpensive visual approximation.");
             }
             StudioTab::Hair => {
                 ui.label("Scalp hair and facial vellus");
