@@ -6,12 +6,12 @@
 - [x] Renderer WGSL procedural no viewport.
 - [x] Controles vivos para cor, poros, micro-relevo, roughness e especular.
 - [x] GitHub Actions para testes e builds Windows/Linux/macOS.
-- [ ] Executar o primeiro build no runner do GitHub e corrigir qualquer incompatibilidade de toolchain/driver que surgir.
+- [x] Executar builds no runner do GitHub e corrigir incompatibilidades de toolchain/compilação conhecidas.
 
 ## M1 — Dados, presets e estabilidade
 - [x] Estruturas Rust tipadas para parâmetros de material.
 - [x] Serialização de presets JSON com versionamento.
-- [x] Presets versão 1 migrados automaticamente para o esquema atual.
+- [x] Presets versão 1 e 2 migrados automaticamente para o esquema atual.
 - [x] Testes unitários para faixas válidas, defaults e migração de preset.
 
 ## M1.5 — Editor inicial de parâmetros de pele
@@ -34,10 +34,15 @@
 - [ ] Base Color por pigmentação em escalas múltiplas.
 - [ ] Portar a calibração Scalp do Skin Studio 2.4.76 sem regressão: Hue +0.0056, Saturation 0.8658, Value 0.9129; validar os alvos de cor documentados na cabeça de teste.
 - [ ] Máscaras anatômicas e mistura suave entre regiões.
-- [ ] Poros grandes, primários e finos com relevo controlável.
-- [ ] Skin Line Network e mapa de altura de referência tileável.
+- [x] Gerador de mapa de altura de poros tileável portado para Rust com resolução, densidade, relevo e seed configuráveis.
+- [x] Três populações de poros Voronoi (grandes, primários e finos), domain warp e variação de tamanho portados para WGSL.
+- [x] Contribuição de poros para normal, albedo e oclusão especular; controles originais relevantes expostos.
+- [x] Heurísticas aproximadas de distribuição regional baseadas no bounding box.
+- [ ] Substituir heurísticas por máscaras anatômicas importadas/pintáveis e adicionar controle de unidades equivalente a Coord Scale.
+- [ ] Skin Line Network, crosshatch, micro-rugas e mapa de altura de referência tileável; portar parâmetros e algoritmo sem simplificação silenciosa.
 - [ ] Lábios, olheiras, vascularização, sardas e microvariação.
 - [ ] Roughness, specular/coat e subsurface com limites calibrados.
+- [ ] Comparação lado a lado com Blender usando cabeça, escala, iluminação e câmera controladas.
 - [ ] Comparação visual automatizada por imagens de referência controladas.
 - [ ] Testes de regressão para os parâmetros/tabelas calibrados existentes no código e no changelog 2.4.76.
 
