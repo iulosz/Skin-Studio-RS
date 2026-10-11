@@ -33,6 +33,62 @@ fn hash3(p: vec3<f32>) -> f32 {
     return fract(sin(dot(p, vec3<f32>(127.1, 311.7, 74.7))) * 43758.5453);
 }
 
+// Trilinear interpolation removes the hard square boundaries caused by hashing
+// floor(position) directly. It is used for broad pigmentation and fine grain.
+fn value_noise3(p: vec3<f32>) -> f32 {
+    let cell = floor(p);
+    let f = fract(p);
+    let w = f * f * (vec3<f32>(3.0) - 2.0 * f);
+
+    let n000 = hash3(cell + vec3<f32>(0.0, 0.0, 0.0));
+    let n100 = hash3(cell + vec3<f32>(1.0, 0.0, 0.0));
+    let n010 = hash3(cell + vec3<f32>(0.0, 1.0, 0.0));
+    let n110 = hash3(cell + vec3<f32>(1.0, 1.0, 0.0));
+    let n001 = hash3(cell + vec3<f32>(0.0, 0.0, 1.0));
+    let n101 = hash3(cell + vec3<f32>(1.0, 0.0, 1.0));
+    let n011 = hash3(cell + vec3<f32>(0.0, 1.0, 1.0));
+    let n111 = hash3(cell + vec3<f32>(1.0, 1.0, 1.0));
+
+    let x00 = mix(n000, n100, w.x);
+    let x10 = mix(n010, n110, w.x);
+    let x01 = mix(n001, n101, w.x);
+    let x11 = mix(n011, n111, w.x);
+    return mix(mix(x00, x10, w.y), mix(x01, x11, w.y), w.z);
+}
+
+// A jittered 3D feature-point field gives pores rounded, uneven spacing instead
+// of the visible square cells produced by thresholded random values.
+fn pore_field(position: vec3<f32>) -> vec4<f32> {
+    let frequency = 112.0;
+    let scaled = position * frequency;
+    let cell = floor(scaled);
+    let local = fract(scaled);
+    var nearest = 2.0;
+    var nearest_delta = vec3<f32>(0.0, 0.0, 0.0);
+
+    for (var z = -1; z <= 1; z = z + 1) {
+        for (var y = -1; y <= 1; y = y + 1) {
+            for (var x = -1; x <= 1; x = x + 1) {
+                let neighbor = vec3<f32>(f32(x), f32(y), f32(z));
+                let feature_cell = cell + neighbor;
+                let jitter = vec3<f32>(
+                    hash3(feature_cell + vec3<f32>(17.0, 53.0, 11.0)),
+                    hash3(feature_cell + vec3<f32>(29.0, 7.0, 43.0)),
+                    hash3(feature_cell + vec3<f32>(3.0, 31.0, 61.0))
+                );
+                let feature = neighbor + vec3<f32>(0.18) + jitter * 0.64;
+                let delta = local - feature;
+                let distance_to_feature = length(delta);
+                if (distance_to_feature < nearest) {
+                    nearest = distance_to_feature;
+                    nearest_delta = delta;
+                }
+            }
+        }
+    }
+    return vec4<f32>(nearest, nearest_delta);
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let normal = normalize(input.world_normal);
@@ -40,30 +96,38 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let view_direction = normalize(u.camera_position.xyz - input.world_position);
     let half_vector = normalize(light_direction + view_direction);
 
-    let broad_variation = hash3(floor(input.world_position * 42.0)) - 0.5;
-    let fine_variation = hash3(floor(input.world_position * 97.0)) - 0.5;
-    let pore_noise = hash3(floor(input.world_position * 175.0));
-    let pores = smoothstep(0.72, 0.96, pore_noise) * u.base_color.w;
+    // Smooth, multiscale pigmentation; unlike quantized cell noise these
+    // signals transition continuously across the surface.
+    let broad_variation = value_noise3(input.world_position * 10.0) - 0.5;
+    let fine_variation = value_noise3(input.world_position * 68.0) - 0.5;
+    let grain_variation = value_noise3(input.world_position * 185.0) - 0.5;
 
-    let freckle_cell = floor(input.world_position * 46.0);
-    let freckle_local = fract(input.world_position * 46.0);
-    let freckle_center = vec3<f32>(
-        hash3(freckle_cell + vec3<f32>(11.0, 3.0, 7.0)),
-        hash3(freckle_cell + vec3<f32>(5.0, 17.0, 13.0)),
-        hash3(freckle_cell + vec3<f32>(19.0, 23.0, 29.0))
-    );
-    let freckle_gate = step(0.955, hash3(freckle_cell + vec3<f32>(31.0, 37.0, 41.0)));
-    let freckle_disk = 1.0 - smoothstep(0.065, 0.14, length(freckle_local - freckle_center));
-    let freckles = freckle_gate * freckle_disk * u.pigment_detail.y;
+    let pore_info = pore_field(input.world_position);
+    let pore_distance = pore_info.x;
+    let pore_delta = pore_info.yzw;
+    let pore_strength = clamp(u.base_color.w, 0.0, 1.0);
 
-    let micro_wave = vec3<f32>(
-        sin(normal.y * 287.0 + normal.z * 83.0),
-        cos(normal.x * 263.0 - normal.z * 91.0),
-        sin(normal.x * 241.0 + normal.y * 197.0)
-    );
-    let perturbed_normal = normalize(
-        normal + micro_wave * (u.surface.w * u.base_color.w * 0.018)
-    );
+    // A soft, darker opening and a restrained raised rim make pores read as
+    // shallow skin indentations rather than black dots or a halftone pattern.
+    let pore_core = 1.0 - smoothstep(0.09, 0.34, pore_distance);
+    let pore_rim = exp(-pow((pore_distance - 0.405) / 0.09, 2.0));
+    let pores = pore_core * pore_strength;
+    let rim = pore_rim * pore_strength;
+
+    // Approximate a small bump response from the local pore profile. Project
+    // the feature direction onto the surface tangent plane before perturbing N.
+    let pore_t = clamp((pore_distance - 0.09) / 0.25, 0.0, 1.0);
+    let pore_slope = 6.0 * pore_t * (1.0 - pore_t) / 0.25;
+    let pore_active = step(0.09, pore_distance) * (1.0 - step(0.34, pore_distance));
+    let pore_direction = normalize(pore_delta + vec3<f32>(0.00001));
+    let tangent_direction = pore_direction - normal * dot(pore_direction, normal);
+    let pore_bump = tangent_direction * pore_slope * pore_active * pore_strength * 0.00055 * 112.0;
+
+    // Fine stochastic grain contributes weakly to albedo, while pore relief
+    // gives the strongest close-up cue. No extra mesh tessellation is needed.
+    let micro_relief = clamp(u.surface.w, 0.0, 1.0);
+    let grain = grain_variation * micro_relief * 0.045;
+    let perturbed_normal = normalize(normal - pore_bump);
 
     let ndotl = max(dot(perturbed_normal, light_direction), 0.0);
     let diffuse = 0.25 + ndotl * 0.75;
@@ -75,15 +139,28 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let back_scatter = pow(max(dot(-perturbed_normal, light_direction), 0.0), 2.0) * u.surface.z;
 
     let variation = clamp(u.pigment_detail.w, 0.0, 1.0);
-    var pigment = 1.0 + broad_variation * (0.04 + variation * 0.15);
-    pigment += fine_variation * variation * 0.025;
-    pigment -= pores * 0.10;
+    var pigment = 1.0 + broad_variation * (0.025 + variation * 0.10);
+    pigment += fine_variation * variation * 0.035;
+    pigment += grain;
+    pigment -= pores * 0.30;
+    pigment += rim * 0.045;
     var base = clamp(u.base_color.rgb * pigment, vec3<f32>(0.0), vec3<f32>(1.0));
 
-    let blood_noise = hash3(floor(input.world_position * 23.0));
+    let blood_noise = value_noise3(input.world_position * 23.0);
     let hemoglobin_mask = 0.35 + 0.65 * blood_noise;
     let hemoglobin_tint = base * vec3<f32>(1.10, 0.76, 0.72);
     base = mix(base, hemoglobin_tint, clamp(u.pigment_detail.x * hemoglobin_mask * 0.22, 0.0, 1.0));
+
+    let freckle_cell = floor(input.world_position * 46.0);
+    let freckle_local = fract(input.world_position * 46.0);
+    let freckle_center = vec3<f32>(
+        hash3(freckle_cell + vec3<f32>(11.0, 3.0, 7.0)),
+        hash3(freckle_cell + vec3<f32>(5.0, 17.0, 13.0)),
+        hash3(freckle_cell + vec3<f32>(19.0, 23.0, 29.0))
+    );
+    let freckle_gate = step(0.955, hash3(freckle_cell + vec3<f32>(31.0, 37.0, 41.0)));
+    let freckle_disk = 1.0 - smoothstep(0.065, 0.14, length(freckle_local - freckle_center));
+    let freckles = freckle_gate * freckle_disk * clamp(u.pigment_detail.y, 0.0, 1.0);
     base *= 1.0 - freckles * 0.38;
 
     var color = base * diffuse;
