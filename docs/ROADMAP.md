@@ -11,7 +11,7 @@
 ## M1 — Dados, presets e estabilidade
 - [x] Estruturas Rust tipadas para parâmetros de material.
 - [x] Serialização de presets JSON com versionamento.
-- [x] Presets versão 1 e 2 migrados automaticamente para o esquema atual.
+- [x] Presets versões 1, 2 e 3 migrados automaticamente para o esquema atual.
 - [x] Testes unitários para faixas válidas, defaults e migração de preset.
 
 ## M1.5 — Editor inicial de parâmetros de pele
@@ -38,7 +38,8 @@
 - [x] Três populações de poros Voronoi (grandes, primários e finos), domain warp e variação de tamanho portados para WGSL.
 - [x] Contribuição de poros para normal, albedo e oclusão especular; controles originais relevantes expostos.
 - [x] Heurísticas aproximadas de distribuição regional baseadas no bounding box.
-- [ ] Substituir heurísticas por máscaras anatômicas importadas/pintáveis e adicionar controle de unidades equivalente a Coord Scale.
+- [x] Adicionar escala física M/CM/MM/custom equivalente ao Coord Scale.
+- [ ] Substituir heurísticas por máscaras anatômicas importadas/pintáveis.
 - [ ] Skin Line Network, crosshatch, micro-rugas e mapa de altura de referência tileável; portar parâmetros e algoritmo sem simplificação silenciosa.
 - [ ] Lábios, olheiras, vascularização, sardas e microvariação.
 - [ ] Roughness, specular/coat e subsurface com limites calibrados.
