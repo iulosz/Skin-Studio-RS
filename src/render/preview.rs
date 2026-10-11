@@ -47,6 +47,11 @@ struct ViewportUniforms {
     reference_aux: [f32; 4],
     skin_line_controls: [f32; 4],
     skin_line_aux: [f32; 4],
+    color_controls: [f32; 4],
+    color_scales: [f32; 4],
+    chromatic_controls: [f32; 4],
+    chromatic_scales: [f32; 4],
+    mottled_controls: [f32; 4],
 }
 
 struct GpuMesh {
@@ -761,6 +766,36 @@ impl SkinPreview {
                 params.skin_line_relief,
             ],
             skin_line_aux: [params.skin_line_shading, 0.0, 0.0, 0.0],
+            color_controls: [
+                params.pigment_variation,
+                params.redness_strength,
+                params.skin_warmth,
+                params.melanin_variation,
+            ],
+            color_scales: [
+                params.variation_scale,
+                params.redness_scale,
+                params.melanin_scale,
+                params.erythema_scale,
+            ],
+            chromatic_controls: [
+                params.erythema_strength,
+                params.golden_variation,
+                params.micro_color_strength,
+                0.0,
+            ],
+            chromatic_scales: [
+                params.golden_scale,
+                params.micro_color_scale,
+                params.mottled_scale_macro,
+                params.mottled_scale_medium,
+            ],
+            mottled_controls: [
+                params.mottled_scale_micro,
+                if params.mottled_enable { params.mottled_strength } else { 0.0 },
+                params.mottled_variation,
+                params.mottled_contrast,
+            ],
         };
 
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(

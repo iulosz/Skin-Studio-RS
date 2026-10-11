@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fs, path::Path};
 
-pub const PRESET_SCHEMA_VERSION: u32 = 6;
+pub const PRESET_SCHEMA_VERSION: u32 = 7;
 
 /// Real-world length used by the source add-on's Coord Scale conversion.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +88,25 @@ pub struct SkinMaterial {
     pub skin_line_thickness: f32,
     pub skin_line_relief: f32,
     pub skin_line_shading: f32,
+    pub variation_scale: f32,
+    pub redness_strength: f32,
+    pub redness_scale: f32,
+    pub skin_warmth: f32,
+    pub mottled_enable: bool,
+    pub mottled_strength: f32,
+    pub mottled_scale_macro: f32,
+    pub mottled_scale_medium: f32,
+    pub mottled_scale_micro: f32,
+    pub mottled_variation: f32,
+    pub mottled_contrast: f32,
+    pub melanin_variation: f32,
+    pub melanin_scale: f32,
+    pub erythema_strength: f32,
+    pub erythema_scale: f32,
+    pub golden_variation: f32,
+    pub golden_scale: f32,
+    pub micro_color_strength: f32,
+    pub micro_color_scale: f32,
 }
 
 impl Default for SkinMaterial {
@@ -143,6 +162,25 @@ impl Default for SkinMaterial {
             skin_line_thickness: 0.35,
             skin_line_relief: 1.0,
             skin_line_shading: 0.18,
+            variation_scale: 4.0,
+            redness_strength: 0.08,
+            redness_scale: 18.0,
+            skin_warmth: 0.32,
+            mottled_enable: true,
+            mottled_strength: 0.62,
+            mottled_scale_macro: 1.6,
+            mottled_scale_medium: 6.0,
+            mottled_scale_micro: 22.0,
+            mottled_variation: 0.6,
+            mottled_contrast: 0.45,
+            melanin_variation: 0.16,
+            melanin_scale: 3.2,
+            erythema_strength: 0.11,
+            erythema_scale: 14.0,
+            golden_variation: 0.10,
+            golden_scale: 9.0,
+            micro_color_strength: 0.055,
+            micro_color_scale: 55.0,
         }
     }
 }
@@ -210,6 +248,24 @@ impl SkinMaterial {
         validate_range("skin_line_thickness", self.skin_line_thickness, 0.05, 1.0)?;
         validate_range("skin_line_relief", self.skin_line_relief, 0.1, 8.0)?;
         validate_range("skin_line_shading", self.skin_line_shading, 0.0, 1.0)?;
+        validate_range("variation_scale", self.variation_scale, 0.1, 30.0)?;
+        validate_range("redness_strength", self.redness_strength, 0.0, 1.0)?;
+        validate_range("redness_scale", self.redness_scale, 0.5, 60.0)?;
+        validate_range("skin_warmth", self.skin_warmth, 0.0, 1.0)?;
+        validate_range("mottled_strength", self.mottled_strength, 0.0, 1.0)?;
+        validate_range("mottled_scale_macro", self.mottled_scale_macro, 0.4, 12.0)?;
+        validate_range("mottled_scale_medium", self.mottled_scale_medium, 2.0, 35.0)?;
+        validate_range("mottled_scale_micro", self.mottled_scale_micro, 10.0, 120.0)?;
+        validate_range("mottled_variation", self.mottled_variation, 0.0, 1.0)?;
+        validate_range("mottled_contrast", self.mottled_contrast, 0.0, 1.0)?;
+        validate_range("melanin_variation", self.melanin_variation, 0.0, 1.0)?;
+        validate_range("melanin_scale", self.melanin_scale, 0.5, 20.0)?;
+        validate_range("erythema_strength", self.erythema_strength, 0.0, 1.0)?;
+        validate_range("erythema_scale", self.erythema_scale, 2.0, 60.0)?;
+        validate_range("golden_variation", self.golden_variation, 0.0, 1.0)?;
+        validate_range("golden_scale", self.golden_scale, 2.0, 40.0)?;
+        validate_range("micro_color_strength", self.micro_color_strength, 0.0, 1.0)?;
+        validate_range("micro_color_scale", self.micro_color_scale, 10.0, 180.0)?;
         validate_range("roughness", self.roughness, 0.03, 1.0)?;
         validate_range("specular", self.specular, 0.0, 1.0)?;
         validate_range("subsurface", self.subsurface, 0.0, 0.7)?;
@@ -396,6 +452,17 @@ impl SkinPreset {
             5 => {
                 // Schema 5 added the source Reference Height controls. Skin Line
                 // Network controls inherit the original add-on defaults in schema 6.
+                let old: SkinPreset =
+                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                Self {
+                    schema_version: PRESET_SCHEMA_VERSION,
+                    name: old.name,
+                    material: old.material,
+                }
+            }
+            6 => {
+                // Schema 6 introduced Skin Line Network. Multi-scale color controls
+                // inherit the original add-on defaults in schema 7.
                 let old: SkinPreset =
                     serde_json::from_str(source).map_err(PresetError::Json)?;
                 Self {
@@ -596,6 +663,36 @@ mod tests {
         assert_eq!(migrated.material.skin_line_thickness, 0.35);
         assert_eq!(migrated.material.skin_line_relief, 1.0);
         assert_eq!(migrated.material.skin_line_shading, 0.18);
+    }
+
+    #[test]
+    fn migrates_v6_presets_and_initializes_multiscale_color_defaults() {
+        let preset = SkinPreset::new("Schema 6", SkinMaterial::default()).unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&preset.to_json_pretty().unwrap()).unwrap();
+        value["schema_version"] = serde_json::Value::from(6);
+        let object = value["material"]
+            .as_object_mut()
+            .expect("preset material should be a JSON object");
+        for key in [
+            "variation_scale", "redness_strength", "redness_scale", "skin_warmth",
+            "mottled_enable", "mottled_strength", "mottled_scale_macro",
+            "mottled_scale_medium", "mottled_scale_micro", "mottled_variation",
+            "mottled_contrast", "melanin_variation", "melanin_scale",
+            "erythema_strength", "erythema_scale", "golden_variation",
+            "golden_scale", "micro_color_strength", "micro_color_scale",
+        ] {
+            object.remove(key);
+        }
+        let migrated = SkinPreset::from_json(&value.to_string()).unwrap();
+        assert_eq!(migrated.schema_version, PRESET_SCHEMA_VERSION);
+        assert_eq!(migrated.material.variation_scale, 4.0);
+        assert!(migrated.material.mottled_enable);
+        assert_eq!(migrated.material.mottled_strength, 0.62);
+        assert_eq!(migrated.material.melanin_scale, 3.2);
+        assert_eq!(migrated.material.erythema_strength, 0.11);
+        assert_eq!(migrated.material.golden_scale, 9.0);
+        assert_eq!(migrated.material.micro_color_scale, 55.0);
     }
 
     #[test]

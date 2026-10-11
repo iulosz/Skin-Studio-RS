@@ -15,6 +15,11 @@ struct ViewportUniforms {
     reference_aux: vec4<f32>,
     skin_line_controls: vec4<f32>,
     skin_line_aux: vec4<f32>,
+    color_controls: vec4<f32>,
+    color_scales: vec4<f32>,
+    chromatic_controls: vec4<f32>,
+    chromatic_scales: vec4<f32>,
+    mottled_controls: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -162,6 +167,27 @@ fn voronoi_f1_edge_3d(p: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(nearest, bisector_distance, cell_id, second);
 }
 
+// Source build_color_layer(): three warped Voronoi pigmentation populations.
+// Each population has a soft distance ramp, a cell-density gate and its own tint.
+fn mottled_spot_mask(
+    p: vec3<f32>,
+    scale: f32,
+    variation: f32,
+    contrast: f32,
+    salt: vec3<f32>
+) -> f32 {
+    let warp_amount = mix(0.02, 0.28, clamp(variation, 0.0, 1.0));
+    let warp = value_noise_color(p * 2.4 + salt) * warp_amount;
+    let warped = p + warp;
+    let distance_to_cell = voronoi_f1_3d(warped * scale);
+    let core_ramp = smoothstep(0.10, 0.42, distance_to_cell);
+    let exponent = mix(0.45, 2.6, clamp(contrast, 0.0, 1.0));
+    let shaped = pow(max(core_ramp, 0.0), exponent);
+    let cell_id = hash3(floor(warped * scale) + salt + vec3<f32>(31.0, 17.0, 47.0));
+    let density_threshold = mix(0.78, 0.32, clamp(variation, 0.0, 1.0));
+    return shaped * step(density_threshold, cell_id);
+}
+
 // Box/triplanar projection mirrors the source's generated height image node.
 // Coordinates are scaled in 0.22 m reference-head units, independent of UVs.
 fn sample_pore_height(p: vec3<f32>, n: vec3<f32>, scale: f32) -> f32 {
@@ -214,6 +240,8 @@ struct RegionDetail {
     primary_pores: f32,
     fine_pores: f32,
     visibility: f32,
+    hemoglobin: f32,
+    eye_area: f32,
 };
 
 // Port of _region_weight() / REGIONAL_RELIEF_TABLE from __init__.py. Imported
@@ -265,6 +293,8 @@ fn region_detail(c: vec3<f32>) -> RegionDetail {
     result.primary_pores = primary_avg * cover + (1.0 - cover);
     result.fine_pores = fine_avg * cover + (1.0 - cover);
     result.visibility = visibility_avg * cover + (1.0 - cover);
+    result.hemoglobin = clamp(max(max(nose, c2), max(e, ey)), 0.0, 1.0);
+    result.eye_area = clamp(eyes, 0.0, 1.0);
     return result;
 }
 
@@ -421,21 +451,87 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let specular = pow(max(dot(perturbed_normal, half_vector), 0.0), specular_power) * specular_strength;
     let back_scatter = pow(max(dot(-perturbed_normal, light_direction), 0.0), 2.0) * u.surface.z;
 
-    // Continuous pigmentation replaces the square-cell hash that caused the
-    // screenshot's large block-like patches. Grain is deliberately low contrast.
-    let broad_variation = value_noise3(skin_position * 10.0) - 0.5;
-    let fine_variation = value_noise3(skin_position * 68.0) - 0.5;
-    let grain_variation = grain_height - 0.5;
-    let variation = clamp(u.pigment_detail.w, 0.0, 1.0);
-    var pigment = 1.0 + broad_variation * (0.025 + variation * 0.10);
-    pigment += fine_variation * variation * 0.035;
-    pigment += grain_variation * clamp(u.grain_controls.w, 0.0, 1.0) * 0.025;
-    pigment -= pore_color_mask * 0.15;
-    pigment -= network_shading * 0.10;
-    var base = clamp(u.base_color.rgb * pigment, vec3<f32>(0.0), vec3<f32>(1.0));
+    // Source build_color_layer(): broad tone, melanin, erythema, golden warmth,
+    // micro-color and legacy redness, followed by three separate mottled scales.
+    let broad_noise = value_noise3(skin_position * clamp(u.color_scales.x, 0.1, 30.0));
+    let broad_tone = mix(
+        vec3<f32>(0.78, 0.62, 0.51),
+        vec3<f32>(1.12, 0.92, 0.76),
+        smoothstep(0.28, 0.72, broad_noise)
+    );
+    var base = mix(
+        u.base_color.rgb,
+        u.base_color.rgb * broad_tone,
+        clamp(u.color_controls.x, 0.0, 1.0)
+    );
+
+    let melanin_noise = value_noise3(skin_position * clamp(u.color_scales.z, 0.5, 20.0));
+    let melanin_tone = mix(
+        vec3<f32>(0.72, 0.80, 0.86),
+        vec3<f32>(0.54, 0.43, 0.34),
+        smoothstep(0.24, 0.76, melanin_noise)
+    );
+    base = mix(base, melanin_tone, clamp(u.color_controls.w, 0.0, 1.0));
+
+    let erythema_noise = value_noise3(skin_position * clamp(u.color_scales.w, 2.0, 60.0));
+    let erythema_mask = smoothstep(0.49, 0.67, erythema_noise);
+    base = mix(
+        base,
+        vec3<f32>(1.16, 0.40, 0.34),
+        clamp(erythema_mask * u.chromatic_controls.x, 0.0, 1.0)
+    );
+
+    let golden_noise = value_noise3(skin_position * clamp(u.chromatic_scales.x, 2.0, 40.0));
+    let golden_tone = mix(
+        vec3<f32>(0.95, 0.84, 0.72),
+        vec3<f32>(1.08, 0.96, 0.72),
+        golden_noise
+    );
+    base = mix(base, base * golden_tone, clamp(u.chromatic_controls.y, 0.0, 1.0));
+
+    let micro_color_noise = value_noise3(skin_position * clamp(u.chromatic_scales.y, 10.0, 180.0));
+    let micro_color_tone = mix(
+        vec3<f32>(0.91, 0.96, 1.00),
+        vec3<f32>(1.03, 0.92, 0.89),
+        smoothstep(0.40, 0.60, micro_color_noise)
+    );
+    base = mix(base, base * micro_color_tone, clamp(u.chromatic_controls.z, 0.0, 1.0));
+
+    let warm_tone = vec3<f32>(1.035, 0.91, 0.83);
+    base = mix(base, base * warm_tone, clamp(u.color_controls.z, 0.0, 1.0));
+
+    let redness_noise = value_noise3(skin_position * clamp(u.color_scales.y, 0.5, 60.0));
+    let redness_mask = smoothstep(0.53, 0.73, redness_noise);
+    base = mix(
+        base,
+        base * vec3<f32>(1.075, 0.94, 0.93),
+        clamp(redness_mask * u.color_controls.y, 0.0, 1.0)
+    );
+
+    let mottled_variation = clamp(u.mottled_controls.z, 0.0, 1.0);
+    let mottled_contrast = clamp(u.mottled_controls.w, 0.0, 1.0);
+    let mottled_strength = clamp(u.mottled_controls.y, 0.0, 1.0);
+    let macro_spot = mottled_spot_mask(
+        skin_position, clamp(u.chromatic_scales.z, 0.4, 12.0),
+        mottled_variation, mottled_contrast, vec3<f32>(11.0, 3.0, 7.0)
+    ) * mottled_strength;
+    let medium_spot = mottled_spot_mask(
+        skin_position, clamp(u.chromatic_scales.w, 2.0, 35.0),
+        mottled_variation, mottled_contrast, vec3<f32>(5.0, 17.0, 13.0)
+    ) * mottled_strength;
+    let micro_spot = mottled_spot_mask(
+        skin_position, clamp(u.mottled_controls.x, 10.0, 120.0),
+        mottled_variation, mottled_contrast, vec3<f32>(19.0, 23.0, 29.0)
+    ) * mottled_strength;
+    base = mix(base, base * vec3<f32>(1.030, 0.965, 0.900), macro_spot);
+    base = mix(base, base * vec3<f32>(1.018, 0.965, 0.955), medium_spot);
+    base = mix(base, base * vec3<f32>(0.985, 0.995, 1.018), micro_spot);
+
+    base *= 1.0 - pore_color_mask * 0.15 - network_shading * 0.10;
+    base = clamp(base, vec3<f32>(0.0), vec3<f32>(1.0));
 
     let blood_noise = value_noise3(skin_position * 23.0);
-    let hemoglobin_mask = 0.35 + 0.65 * blood_noise;
+    let hemoglobin_mask = (0.35 + 0.65 * blood_noise) * regions.hemoglobin;
     let hemoglobin_tint = base * vec3<f32>(1.10, 0.76, 0.72);
     base = mix(base, hemoglobin_tint, clamp(u.pigment_detail.x * hemoglobin_mask * 0.22, 0.0, 1.0));
 

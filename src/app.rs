@@ -224,10 +224,87 @@ impl SkinStudioApp {
                 );
                 ui.add(
                     egui::Slider::new(&mut self.params.pigment_variation, 0.0..=1.0)
-                        .text("Pigment variation"),
+                        .text("Color variation"),
                 );
+                ui.add(
+                    egui::Slider::new(&mut self.params.variation_scale, 0.1..=30.0)
+                        .text("Variation scale"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.melanin_variation, 0.0..=1.0)
+                        .text("Melanin variation"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.melanin_scale, 0.5..=20.0)
+                        .text("Melanin scale"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.erythema_strength, 0.0..=1.0)
+                        .text("Erythema strength"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.erythema_scale, 2.0..=60.0)
+                        .text("Erythema scale"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.golden_variation, 0.0..=1.0)
+                        .text("Golden variation"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.golden_scale, 2.0..=40.0)
+                        .text("Golden scale"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.micro_color_strength, 0.0..=1.0)
+                        .text("Micro color detail"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.micro_color_scale, 10.0..=180.0)
+                        .text("Micro color scale"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.redness_strength, 0.0..=1.0)
+                        .text("General redness"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.redness_scale, 0.5..=60.0)
+                        .text("Redness scale"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.skin_warmth, 0.0..=1.0)
+                        .text("Skin warmth"),
+                );
+                ui.separator();
+                ui.label(egui::RichText::new("Mottled pigmentation spots").strong());
+                ui.checkbox(&mut self.params.mottled_enable, "Enable mottled skin");
+                if self.params.mottled_enable {
+                    ui.add(
+                        egui::Slider::new(&mut self.params.mottled_strength, 0.0..=1.0)
+                            .text("Mottled strength"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.params.mottled_scale_macro, 0.4..=12.0)
+                            .text("Macro scale"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.params.mottled_scale_medium, 2.0..=35.0)
+                            .text("Medium scale"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.params.mottled_scale_micro, 10.0..=120.0)
+                            .text("Micro scale"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.params.mottled_variation, 0.0..=1.0)
+                            .text("Spot variation"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut self.params.mottled_contrast, 0.0..=1.0)
+                            .text("Spot contrast"),
+                    );
+                }
                 ui.add_space(6.0);
-                ui.label("These controls update the GPU preview immediately. Regional anatomy and calibrated pigment layers are not implemented yet.");
+                ui.label("Ported color layers: broad tone, melanin, erythema, golden tone, micro color, redness and three-scale mottled pigmentation. The dedicated UV-based Albedo Realism layer and painted masks are a separate stage.");
             }
             StudioTab::Detail => {
                 ui.label(egui::RichText::new("Skin Line Network").strong());
