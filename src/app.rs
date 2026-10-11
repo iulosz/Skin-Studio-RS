@@ -1,6 +1,4 @@
 use eframe::egui;
-use std::{path::PathBuf, str::FromStr};
-
 use crate::{
     material::{SkinMaterial, SkinPreset, load_preset, save_preset},
     render::SkinPreview,
@@ -72,7 +70,7 @@ impl SkinStudioApp {
                 return;
             }
         };
-        match save_preset(PathBuf::from_str(&self.preset_path).unwrap_or_default(), &preset) {
+        match save_preset(&self.preset_path, &preset) {
             Ok(()) => self.status = format!("Preset saved: {}", self.preset_path),
             Err(error) => self.status = format!("Preset save failed: {error}"),
         }
