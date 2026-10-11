@@ -4,30 +4,9 @@ use bytemuck::{Pod, Zeroable};
 use eframe::egui;
 use eframe::egui_wgpu::{self, wgpu};
 
+use crate::material::SkinMaterial;
+
 const SHADER: &str = include_str!("skin_preview.wgsl");
-
-#[derive(Clone, Copy, Debug)]
-pub struct SkinPreviewParams {
-    pub base_color: [f32; 3],
-    pub pore_strength: f32,
-    pub roughness: f32,
-    pub specular: f32,
-    pub subsurface: f32,
-    pub micro_relief: f32,
-}
-
-impl Default for SkinPreviewParams {
-    fn default() -> Self {
-        Self {
-            base_color: [0.68, 0.43, 0.33],
-            pore_strength: 0.42,
-            roughness: 0.58,
-            specular: 0.24,
-            subsurface: 0.18,
-            micro_relief: 0.35,
-        }
-    }
-}
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -146,7 +125,7 @@ impl SkinPreview {
         Self { available: true }
     }
 
-    pub fn show(&self, ui: &mut egui::Ui, params: SkinPreviewParams) {
+    pub fn show(&self, ui: &mut egui::Ui, params: SkinMaterial) {
         if !self.available {
             ui.centered_and_justified(|ui| {
                 ui.label("O backend WGPU não foi inicializado. Verifique o suporte gráfico do sistema.");
