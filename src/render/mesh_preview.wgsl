@@ -9,6 +9,7 @@ struct ViewportUniforms {
     grain_controls: vec4<f32>,
     regional_a: vec4<f32>,
     regional_b: vec4<f32>,
+    optical_controls: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -275,10 +276,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let ndotl = max(dot(perturbed_normal, light_direction), 0.0);
     let diffuse = 0.25 + ndotl * 0.75;
     let oiliness = clamp(u.pigment_detail.z, 0.0, 1.0);
-    let roughness = clamp(mix(u.surface.x, u.surface.x * 0.42, oiliness), 0.035, 1.0);
+    let roughness = clamp(
+        mix(u.surface.x, u.surface.x * 0.42, oiliness)
+        + (grain_height - 0.5) * clamp(u.grain_controls.z, 0.0, 0.15),
+        0.035,
+        1.0
+    );
     let specular_power = mix(180.0, 5.0, roughness);
     let specular_strength = clamp(u.surface.y + oiliness * 0.35, 0.0, 1.0)
-        * (1.0 - clamp(pore_color_mask * 0.55, 0.0, 0.9));
+        * (1.0 - clamp(pore_color_mask * u.optical_controls.x, 0.0, 0.9));
     let specular = pow(max(dot(perturbed_normal, half_vector), 0.0), specular_power) * specular_strength;
     let back_scatter = pow(max(dot(-perturbed_normal, light_direction), 0.0), 2.0) * u.surface.z;
 
