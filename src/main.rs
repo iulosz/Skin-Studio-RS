@@ -1,4 +1,5 @@
 mod app;
+mod material;
 mod render;
 
 fn main() -> eframe::Result {
