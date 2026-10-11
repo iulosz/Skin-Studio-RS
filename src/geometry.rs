@@ -15,8 +15,12 @@ const MAX_MESH_INDICES: usize = 15_000_000;
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct MeshVertex {
+    /// Position normalized only for viewport framing.
     pub position: [f32; 3],
     pub normal: [f32; 3],
+    /// Original object-space position in units of 0.22 metres. The source add-on
+    /// uses this scale so a 145-cell pore pattern remains approximately 1.5 mm.
+    pub skin_position: [f32; 3],
 }
 
 #[derive(Clone, Debug)]
@@ -56,6 +60,8 @@ impl MeshData {
                 vertices.push(MeshVertex {
                     position: (normal * 0.82).to_array(),
                     normal: normal.to_array(),
+                    // Treat the demo sphere as a head-sized 22 cm surface.
+                    skin_position: (normal * 0.5).to_array(),
                 });
             }
         }
@@ -128,7 +134,12 @@ impl MeshData {
 
         let scale = 1.7 / extent;
         for vertex in &mut self.vertices {
-            vertex.position = ((Vec3::from_array(vertex.position) - center) * scale).to_array();
+            let source_position = Vec3::from_array(vertex.position);
+            // Mirror _patch_skin_coordinates(): source object coordinates are
+            // multiplied by metres-per-unit / 0.22 m before the preview framing
+            // transform. The current importer assumes OBJ/glTF coordinates are metres.
+            vertex.skin_position = (source_position / 0.22).to_array();
+            vertex.position = ((source_position - center) * scale).to_array();
         }
         Ok(())
     }
@@ -255,6 +266,7 @@ fn parse_obj(source: &str, name: &str) -> Result<MeshData, MeshError> {
                         vertices.push(MeshVertex {
                             position: positions[position].to_array(),
                             normal: normal_value,
+                            skin_position: [0.0; 3],
                         });
                         has_explicit_normal.push(normal.is_some());
                         deduplicated.insert(key, vertex_index);
@@ -458,6 +470,7 @@ fn append_gltf_node(
                 output.vertices.push(MeshVertex {
                     position: world_position.to_array(),
                     normal: world_normal.to_array(),
+                    skin_position: [0.0; 3],
                 });
             }
             for index in source_indices {
