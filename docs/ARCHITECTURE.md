@@ -33,7 +33,7 @@ O código original de referência é `__init__.py`, especialmente `generate_pore
 
 - `src/skin_detail.rs` implementa o gerador CPU de altura tileável: células Voronoi com F1/F2, domos, sulcos, depressões e micro-ondas periódicas. A saída é um canal linear, convertido para R16Float no upload WGPU, não uma imagem sRGB de cor.
 - `src/render/mesh_preview.wgsl` implementa três escalas de poros Voronoi (primária, fina e grande), warp de coordenadas, variação de tamanho, projeção triplanar do mapa de altura e contribuições separadas de fine bump e micro-grain. A máscara dos poros também altera discretamente o albedo e o especular.
-- `MeshVertex.skin_position` preserva as coordenadas de origem para que a normalização feita só para enquadrar a viewport não mude o tamanho do detalhe. Neste estágio, OBJ/glTF é interpretado em metros; o controle equivalente ao `coord_unit` do addon ainda precisa ser adicionado.
+- `MeshVertex.skin_position` preserva as coordenadas de origem para que a normalização feita só para enquadrar a viewport não mude o tamanho do detalhe. O controle `CoordinateUnit` mapeia M/CM/MM/custom para metros por unidade e o WGSL calcula `Object * (meters_per_unit / 0.22 m)`, como no `_patch_skin_coordinates()` do addon. O modelo importado deve ser declarado com a unidade em que foi criado.
 - `MeshVertex.region_position` permite usar as heurísticas de região derivadas de `_region_weight()`. Essas máscaras são aproximadas pelo bounding box e orientação -Y; não são máscaras pintadas nem equivalem a grupos anatômicos reais. Por isso a interface identifica essa limitação.
 
 ## Critérios de fidelidade
