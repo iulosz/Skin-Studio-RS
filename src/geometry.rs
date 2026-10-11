@@ -23,6 +23,9 @@ pub struct MeshVertex {
     pub skin_position: [f32; 3],
     /// Bbox-normalized coordinates used by the original add-on's head-region heuristics.
     pub region_position: [f32; 3],
+    /// UV coordinates from OBJ vt or glTF TEXCOORD_0; Z=1 means UVs exist.
+    /// The shader uses bbox coordinates when Z=0.
+    pub uv_data: [f32; 3],
 }
 
 #[derive(Clone, Debug)]
@@ -65,6 +68,7 @@ impl MeshData {
                     // Treat the demo sphere as a head-sized 22 cm surface.
                     skin_position: (normal * 0.11).to_array(),
                     region_position: (normal * 0.5 + Vec3::splat(0.5)).to_array(),
+                    uv_data: [x as f32 / segments as f32, y as f32 / rings as f32, 1.0],
                 });
             }
         }
@@ -202,6 +206,7 @@ impl MeshData {
         if self.vertices.iter().any(|vertex| {
             !vertex.position.iter().all(|v| v.is_finite())
                 || !vertex.normal.iter().all(|v| v.is_finite())
+                || !vertex.uv_data.iter().all(|v| v.is_finite())
         }) {
             return Err(MeshError::InvalidMesh(
                 "mesh contains non-finite vertex data".to_owned(),
@@ -214,10 +219,11 @@ impl MeshData {
 fn parse_obj(source: &str, name: &str) -> Result<MeshData, MeshError> {
     let mut positions: Vec<Vec3> = Vec::new();
     let mut normals: Vec<Vec3> = Vec::new();
+    let mut texcoords: Vec<[f32; 2]> = Vec::new();
     let mut vertices: Vec<MeshVertex> = Vec::new();
     let mut has_explicit_normal: Vec<bool> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
-    let mut deduplicated: HashMap<(usize, Option<usize>), u32> = HashMap::new();
+    let mut deduplicated: HashMap<(usize, Option<usize>, Option<usize>), u32> = HashMap::new();
 
     for (line_index, raw_line) in source.lines().enumerate() {
         let line_number = line_index + 1;
@@ -235,6 +241,9 @@ fn parse_obj(source: &str, name: &str) -> Result<MeshData, MeshError> {
                 let values = parse_vec3(words, line_number, "normal")?;
                 normals.push(Vec3::from_array(values).normalize_or_zero());
             }
+            "vt" => {
+                texcoords.push(parse_vec2(words, line_number, "texture coordinate")?);
+            }
             "f" => {
                 let face: Result<Vec<u32>, MeshError> = words
                     .map(|token| {
@@ -246,7 +255,10 @@ fn parse_obj(source: &str, name: &str) -> Result<MeshData, MeshError> {
                             line_number,
                             "position",
                         )?;
-                        let _texcoord = parts.next();
+                        let texcoord_raw = parts.next().filter(|s| !s.is_empty());
+                        let texcoord = texcoord_raw
+                            .map(|raw| resolve_obj_index(raw, texcoords.len(), line_number, "texture coordinate"))
+                            .transpose()?;
                         let normal_raw = parts.next().filter(|s| !s.is_empty());
                         let normal = normal_raw
                             .map(|raw| {
@@ -254,7 +266,7 @@ fn parse_obj(source: &str, name: &str) -> Result<MeshData, MeshError> {
                             })
                             .transpose()?;
 
-                        let key = (position, normal);
+                        let key = (position, texcoord, normal);
                         if let Some(&existing) = deduplicated.get(&key) {
                             return Ok(existing);
                         }
@@ -272,6 +284,7 @@ fn parse_obj(source: &str, name: &str) -> Result<MeshData, MeshError> {
                             normal: normal_value,
                             skin_position: [0.0; 3],
                             region_position: [0.0; 3],
+                            uv_data: texcoord.map(|i| [texcoords[i][0], texcoords[i][1], 1.0]).unwrap_or([0.0; 3]),
                         });
                         has_explicit_normal.push(normal.is_some());
                         deduplicated.insert(key, vertex_index);
@@ -329,6 +342,31 @@ fn parse_obj(source: &str, name: &str) -> Result<MeshData, MeshError> {
         vertices,
         indices,
     })
+}
+
+fn parse_vec2<'a>(
+    mut words: impl Iterator<Item = &'a str>,
+    line: usize,
+    kind: &str,
+) -> Result<[f32; 2], MeshError> {
+    let mut values = [0.0; 2];
+    for value in values.iter_mut() {
+        let raw = words.next().ok_or_else(|| MeshError::Parse {
+            line,
+            detail: format!("{kind} needs two coordinates"),
+        })?;
+        *value = raw.parse::<f32>().map_err(|_| MeshError::Parse {
+            line,
+            detail: format!("invalid {kind} coordinate '{raw}'"),
+        })?;
+    }
+    if !values.iter().all(|value| value.is_finite()) {
+        return Err(MeshError::Parse {
+            line,
+            detail: format!("{kind} contains a non-finite coordinate"),
+        });
+    }
+    Ok(values)
 }
 
 fn parse_vec3<'a>(
@@ -441,6 +479,9 @@ fn append_gltf_node(
                 .collect();
             let normals: Option<Vec<[f32; 3]>> =
                 reader.read_normals().map(|values| values.collect());
+            let texcoords: Option<Vec<[f32; 2]>> = reader
+                .read_tex_coords(0)
+                .map(|values| values.into_f32().collect());
             let source_indices: Vec<u32> = reader
                 .read_indices()
                 .map(|values| values.into_u32().collect())
@@ -477,6 +518,7 @@ fn append_gltf_node(
                     normal: world_normal.to_array(),
                     skin_position: [0.0; 3],
                     region_position: [0.0; 3],
+                    uv_data: texcoords.as_ref().and_then(|values| values.get(index)).map(|uv| [uv[0], uv[1], 1.0]).unwrap_or([0.0; 3]),
                 });
             }
             for index in source_indices {

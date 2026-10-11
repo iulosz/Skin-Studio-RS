@@ -25,8 +25,8 @@ const MESH_SHADER: &str = include_str!("mesh_preview.wgsl");
 const GRID_SHADER: &str = include_str!("grid.wgsl");
 const DISPLAY_SHADER: &str = include_str!("display.wgsl");
 
-const MESH_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
-    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3, 3 => Float32x3];
+const MESH_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 5] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3, 3 => Float32x3, 4 => Float32x3];
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -461,24 +461,28 @@ fn make_grid_vertices() -> Vec<MeshVertex> {
             normal: [0.0; 3],
             skin_position: [offset, floor_y, -half],
             region_position: [0.0; 3],
+            uv_data: [0.0; 3],
         });
         vertices.push(MeshVertex {
             position: [offset, floor_y, half],
             normal: [0.0; 3],
             skin_position: [offset, floor_y, half],
             region_position: [0.0; 3],
+            uv_data: [0.0; 3],
         });
         vertices.push(MeshVertex {
             position: [-half, floor_y, offset],
             normal: [0.0; 3],
             skin_position: [-half, floor_y, offset],
             region_position: [0.0; 3],
+            uv_data: [0.0; 3],
         });
         vertices.push(MeshVertex {
             position: [half, floor_y, offset],
             normal: [0.0; 3],
             skin_position: [half, floor_y, offset],
             region_position: [0.0; 3],
+            uv_data: [0.0; 3],
         });
     }
     vertices

@@ -42,6 +42,7 @@ struct VertexInput {
     @location(1) normal: vec3<f32>,
     @location(2) skin_position: vec3<f32>,
     @location(3) region_position: vec3<f32>,
+    @location(4) uv_data: vec3<f32>,
 };
 
 struct VertexOutput {
@@ -50,6 +51,7 @@ struct VertexOutput {
     @location(1) world_normal: vec3<f32>,
     @location(2) skin_position: vec3<f32>,
     @location(3) region_position: vec3<f32>,
+    @location(4) uv_data: vec3<f32>,
 };
 
 @vertex
@@ -60,6 +62,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     output.world_normal = normalize(input.normal);
     output.skin_position = input.skin_position;
     output.region_position = input.region_position;
+    output.uv_data = input.uv_data;
     return output;
 }
 
