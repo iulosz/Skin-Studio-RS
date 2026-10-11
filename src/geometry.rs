@@ -320,7 +320,7 @@ fn parse_vec3<'a>(
     kind: &str,
 ) -> Result<[f32; 3], MeshError> {
     let mut values = [0.0; 3];
-    for (i, value) in values.iter_mut().enumerate() {
+    for value in values.iter_mut() {
         let raw = words.next().ok_or_else(|| MeshError::Parse {
             line,
             detail: format!("{kind} needs three coordinates"),
