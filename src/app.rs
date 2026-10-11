@@ -1,6 +1,9 @@
+use std::time::Duration;
+
 use eframe::egui;
 use crate::{
     material::{CoordinateUnit, SkinMaterial, SkinPreset, load_preset, save_preset},
+    reference_height::ReferenceHeightSettings,
     render::SkinPreview,
     skin_detail::PoreMapSettings,
 };
@@ -83,7 +86,8 @@ impl SkinStudioApp {
                 self.params = preset.material;
                 self.preset_name = preset.name;
                 self.regenerate_pore_map();
-                self.status = format!("Preset loaded: {} · pore map regenerated", self.preset_path);
+                self.start_reference_map_generation();
+                self.status = format!("Preset loaded: {} · height maps regenerated", self.preset_path);
             }
             Err(error) => self.status = format!("Preset load failed: {error}"),
         }
@@ -107,6 +111,19 @@ impl SkinStudioApp {
                 self.status = format!("Pore height map failed: {error}");
             }
         }
+    }
+
+    fn start_reference_map_generation(&mut self) {
+        let settings = ReferenceHeightSettings {
+            resolution: self.params.reference_resolution,
+            seed: self.params.reference_seed,
+            pores: self.params.reference_pores,
+        };
+        self.preview.request_reference_map_generation(settings);
+        self.status = format!(
+            "Generating reference skin height · {} px · seed {}",
+            settings.resolution, settings.seed
+        );
     }
 
     fn import_mesh(&mut self) {
@@ -369,9 +386,55 @@ impl SkinStudioApp {
                 ui.label("Ported from Skin Studio 2.4.76: three Voronoi pore populations, domain warp, generated tileable height, separate fine bump and micro grain.");
             }
             StudioTab::Reference => {
-                ui.label("Reference-driven Skin Line Network");
-                ui.separator();
-                ui.label("The original reference-height generator and its calibration will be reimplemented as a separate Rust module.");
+                ui.label(egui::RichText::new("Reference skin-height map").strong());
+                ui.label("Skin style · tileable cellular network, shallow furrows, junction pores and filtered micro-grain.");
+                ui.add(
+                    egui::Slider::new(&mut self.params.reference_strength, 0.0..=1.0)
+                        .text("Reference relief strength"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.reference_relief, 0.1..=8.0)
+                        .text("Reference relief"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.reference_cell_mm, 0.02..=200.0)
+                        .logarithmic(true)
+                        .text("Reference cell (mm)"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.reference_pores, 0.0..=3.0)
+                        .text("Junction pores"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.reference_resolution, 256..=4096)
+                        .text("Map resolution"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.reference_seed, 0..=999_999)
+                        .text("Map seed"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.reference_color, 0.0..=1.0)
+                        .text("Cavity color"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.reference_rough, 0.0..=0.6)
+                        .text("Cavity roughness"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.reference_regional, 0.0..=1.0)
+                        .text("Regional influence"),
+                );
+                if self.preview.reference_map_generation_pending() {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Generating tileable height map in background…");
+                    });
+                } else if ui.button("Generate Reference Height").clicked() {
+                    self.start_reference_map_generation();
+                }
+                ui.label("The original LEATHER style and its independent calibration have not been ported yet; this generator implements the SKIN style.");
+                ui.label("This map is a separate bump layer; it does not replace the small/medium/large pore populations.");
             }
             StudioTab::Surface => {
                 ui.label(egui::RichText::new("Surface response").strong());
@@ -414,6 +477,15 @@ impl SkinStudioApp {
 
 impl eframe::App for SkinStudioApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if let Some(result) = self.preview.poll_reference_map_generation() {
+            self.status = match result {
+                Ok(()) => "Reference height map generated and uploaded on next frame".to_owned(),
+                Err(error) => format!("Reference height generation failed: {error}"),
+            };
+        }
+        if self.preview.reference_map_generation_pending() {
+            ui.ctx().request_repaint_after(Duration::from_millis(33));
+        }
         egui::Frame::central_panel(ui.style()).show(ui, |ui| {
             self.toolbar(ui);
             ui.separator();

@@ -11,7 +11,7 @@
 ## M1 — Dados, presets e estabilidade
 - [x] Estruturas Rust tipadas para parâmetros de material.
 - [x] Serialização de presets JSON com versionamento.
-- [x] Presets versões 1, 2 e 3 migrados automaticamente para o esquema atual.
+- [x] Presets versões 1 a 4 migrados automaticamente para o esquema atual.
 - [x] Testes unitários para faixas válidas, defaults e migração de preset.
 
 ## M1.5 — Editor inicial de parâmetros de pele
@@ -40,10 +40,12 @@
 - [x] Heurísticas aproximadas de distribuição regional baseadas no bounding box.
 - [x] Adicionar escala física M/CM/MM/custom equivalente ao Coord Scale.
 - [ ] Substituir heurísticas por máscaras anatômicas importadas/pintáveis.
-- [ ] Skin Line Network, crosshatch, micro-rugas e mapa de altura de referência tileável; portar parâmetros e algoritmo sem simplificação silenciosa.
+- [x] Portar o estilo SKIN do mapa Reference Height: duas redes Worley, sulcos, poros nas junções, ruído periódico filtrado por FFT e upload linear R16Float.
+- [ ] Portar o estilo LEATHER da Reference Height com seus parâmetros e calibração independentes.
+- [ ] Skin Line Network, crosshatch e micro-rugas; portar parâmetros e algoritmo sem simplificação silenciosa.
 - [ ] Lábios, olheiras, vascularização, sardas e microvariação.
 - [ ] Roughness, specular/coat e subsurface com limites calibrados.
-- [ ] Comparação lado a lado com Blender usando cabeça, escala, iluminação e câmera controladas.
+- [ ] Comparação lado a lado com Blender usando cabeça, escala, iluminação e câmera controladas, principalmente para Reference Height e tamanho físico das células.
 - [ ] Comparação visual automatizada por imagens de referência controladas.
 - [ ] Testes de regressão para os parâmetros/tabelas calibrados existentes no código e no changelog 2.4.76.
 

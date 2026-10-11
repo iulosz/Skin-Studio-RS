@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fs, path::Path};
 
-pub const PRESET_SCHEMA_VERSION: u32 = 4;
+pub const PRESET_SCHEMA_VERSION: u32 = 5;
 
 /// Real-world length used by the source add-on's Coord Scale conversion.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +74,15 @@ pub struct SkinMaterial {
     pub spec_pore_occlusion: f32,
     pub coord_unit: CoordinateUnit,
     pub coord_custom_meters_per_unit: f32,
+    pub reference_strength: f32,
+    pub reference_relief: f32,
+    pub reference_cell_mm: f32,
+    pub reference_pores: f32,
+    pub reference_seed: u32,
+    pub reference_resolution: u32,
+    pub reference_color: f32,
+    pub reference_rough: f32,
+    pub reference_regional: f32,
 }
 
 impl Default for SkinMaterial {
@@ -115,6 +124,15 @@ impl Default for SkinMaterial {
             spec_pore_occlusion: 0.55,
             coord_unit: CoordinateUnit::Meter,
             coord_custom_meters_per_unit: 1.0,
+            reference_strength: 0.0,
+            reference_relief: 1.0,
+            reference_cell_mm: 1.16,
+            reference_pores: 1.0,
+            reference_seed: 11,
+            reference_resolution: 1024,
+            reference_color: 0.0,
+            reference_rough: 0.0,
+            reference_regional: 0.0,
         }
     }
 }
@@ -162,6 +180,21 @@ impl SkinMaterial {
             0.00001,
             1000.0,
         )?;
+        validate_range("reference_strength", self.reference_strength, 0.0, 1.0)?;
+        validate_range("reference_relief", self.reference_relief, 0.1, 8.0)?;
+        validate_range("reference_cell_mm", self.reference_cell_mm, 0.02, 200.0)?;
+        validate_range("reference_pores", self.reference_pores, 0.0, 3.0)?;
+        if !(256..=4096).contains(&self.reference_resolution) {
+            return Err(PresetError::InvalidParameter {
+                name: "reference_resolution".to_owned(),
+                value: self.reference_resolution as f32,
+                min: 256.0,
+                max: 4096.0,
+            });
+        }
+        validate_range("reference_color", self.reference_color, 0.0, 1.0)?;
+        validate_range("reference_rough", self.reference_rough, 0.0, 0.6)?;
+        validate_range("reference_regional", self.reference_regional, 0.0, 1.0)?;
         validate_range("roughness", self.roughness, 0.03, 1.0)?;
         validate_range("specular", self.specular, 0.0, 1.0)?;
         validate_range("subsurface", self.subsurface, 0.0, 0.7)?;
@@ -334,6 +367,17 @@ impl SkinPreset {
                     material: old.material,
                 }
             }
+            4 => {
+                // Schema 4 added physical coordinate units. Schema 5 adds the
+                // reference-height generator and inherits its source-compatible defaults.
+                let old: SkinPreset =
+                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                Self {
+                    schema_version: PRESET_SCHEMA_VERSION,
+                    name: old.name,
+                    material: old.material,
+                }
+            }
             PRESET_SCHEMA_VERSION => serde_json::from_str(source).map_err(PresetError::Json)?,
             version => return Err(PresetError::UnsupportedVersion(version)),
         };
@@ -469,6 +513,36 @@ mod tests {
         assert_eq!(migrated.schema_version, PRESET_SCHEMA_VERSION);
         assert_eq!(migrated.material.coord_unit, CoordinateUnit::Meter);
         assert_eq!(migrated.material.coord_custom_meters_per_unit, 1.0);
+    }
+
+    #[test]
+    fn migrates_v4_presets_and_initializes_reference_height_defaults() {
+        let preset = SkinPreset::new("Schema 4", SkinMaterial::default()).unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&preset.to_json_pretty().unwrap()).unwrap();
+        value["schema_version"] = serde_json::Value::from(4);
+        let object = value["material"]
+            .as_object_mut()
+            .expect("preset material should be a JSON object");
+        for key in [
+            "reference_strength",
+            "reference_relief",
+            "reference_cell_mm",
+            "reference_pores",
+            "reference_seed",
+            "reference_resolution",
+            "reference_color",
+            "reference_rough",
+            "reference_regional",
+        ] {
+            object.remove(key);
+        }
+        let migrated = SkinPreset::from_json(&value.to_string()).unwrap();
+        assert_eq!(migrated.schema_version, PRESET_SCHEMA_VERSION);
+        assert_eq!(migrated.material.reference_strength, 0.0);
+        assert_eq!(migrated.material.reference_cell_mm, 1.16);
+        assert_eq!(migrated.material.reference_resolution, 1024);
+        assert_eq!(migrated.material.reference_seed, 11);
     }
 
     #[test]

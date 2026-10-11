@@ -11,6 +11,8 @@ struct ViewportUniforms {
     regional_b: vec4<f32>,
     optical_controls: vec4<f32>,
     coordinate_controls: vec4<f32>,
+    reference_controls: vec4<f32>,
+    reference_aux: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -22,6 +24,11 @@ var<uniform> u: ViewportUniforms;
 var pore_height_texture: texture_2d<f32>;
 @group(1) @binding(1)
 var pore_height_sampler: sampler;
+
+@group(2) @binding(0)
+var reference_height_texture: texture_2d<f32>;
+@group(2) @binding(1)
+var reference_height_sampler: sampler;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -122,6 +129,15 @@ fn sample_pore_height(p: vec3<f32>, n: vec3<f32>, scale: f32) -> f32 {
 
 // Reconstruct a surface gradient from screen derivatives, then perturb the normal.
 // This is a shader-side equivalent of chaining Blender Bump nodes, not displacement.
+fn sample_reference_height(p: vec3<f32>, n: vec3<f32>, scale: f32) -> f32 {
+    let weights_raw = pow(abs(n), vec3<f32>(4.0));
+    let weights = weights_raw / max(weights_raw.x + weights_raw.y + weights_raw.z, 0.0001);
+    let h_x = textureSample(reference_height_texture, reference_height_sampler, p.yz * scale).r;
+    let h_y = textureSample(reference_height_texture, reference_height_sampler, p.xz * scale).r;
+    let h_z = textureSample(reference_height_texture, reference_height_sampler, p.xy * scale).r;
+    return h_x * weights.x + h_y * weights.y + h_z * weights.z;
+}
+
 fn bump_from_height(
     normal: vec3<f32>,
     metric_position: vec3<f32>,
@@ -276,9 +292,28 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         clamp(u.pore_variation.z, 0.0, 0.5)
     );
     let grain_height = value_noise3(skin_position * clamp(u.grain_controls.y, 50.0, 1000.0));
-    let perturbed_normal = bump_from_height(
+    let micro_normal = bump_from_height(
         fine_normal, metric_position, grain_height, 0.008,
         clamp(u.grain_controls.x, 0.0, 0.20)
+    );
+
+    // Independent tileable Reference Height layer, ported from _ref_skin_height().
+    // Reference strength is zero by default and is not coupled to Pore Strength.
+    let reference_height = sample_reference_height(
+        skin_position, normal, clamp(u.reference_controls.z, 0.001, 1000.0)
+    );
+    let reference_cavity = 1.0 - smoothstep(0.32, 0.47, reference_height);
+    let reference_region = mix(
+        1.0,
+        clamp(regions.visibility, 0.0, 1.6),
+        clamp(u.reference_aux.z, 0.0, 1.0)
+    );
+    let perturbed_normal = bump_from_height(
+        micro_normal,
+        metric_position,
+        reference_height,
+        max(u.reference_controls.y, 0.0),
+        clamp(u.reference_controls.x * reference_region, 0.0, 1.0)
     );
 
     let ndotl = max(dot(perturbed_normal, light_direction), 0.0);
@@ -286,7 +321,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let oiliness = clamp(u.pigment_detail.z, 0.0, 1.0);
     let roughness = clamp(
         mix(u.surface.x, u.surface.x * 0.42, oiliness)
-        + (grain_height - 0.5) * clamp(u.grain_controls.z, 0.0, 0.15),
+        + (grain_height - 0.5) * clamp(u.grain_controls.z, 0.0, 0.15)
+        + (reference_cavity - 0.2) * clamp(u.reference_aux.y, 0.0, 0.6),
         0.035,
         1.0
     );
@@ -325,6 +361,14 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let freckle_disk = 1.0 - smoothstep(0.065, 0.14, length(freckle_local - freckle_center));
     let freckles = freckle_gate * freckle_disk * clamp(u.pigment_detail.y, 0.0, 1.0);
     base *= 1.0 - freckles * 0.38;
+    let reference_color_strength = clamp(u.reference_aux.x, 0.0, 1.0);
+    let reference_warm_tint = base * vec3<f32>(1.035, 0.965, 0.91);
+    base = mix(
+        base,
+        reference_warm_tint,
+        clamp(reference_cavity * reference_color_strength, 0.0, 1.0)
+    );
+    base *= 1.0 - reference_cavity * reference_color_strength * 0.055;
 
     var color = base * diffuse;
     color += base * back_scatter * vec3<f32>(1.0, 0.48, 0.30);
