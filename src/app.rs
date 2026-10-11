@@ -1,6 +1,6 @@
 use eframe::egui;
 use crate::{
-    material::{SkinMaterial, SkinPreset, load_preset, save_preset},
+    material::{CoordinateUnit, SkinMaterial, SkinPreset, load_preset, save_preset},
     render::SkinPreview,
     skin_detail::PoreMapSettings,
 };
@@ -329,6 +329,43 @@ impl SkinStudioApp {
                         .small(),
                     );
                 });
+                ui.separator();
+                ui.label(egui::RichText::new("Real-world scale").strong());
+                egui::ComboBox::from_label("Mesh units")
+                    .selected_text(self.params.coord_unit.label())
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(
+                            &mut self.params.coord_unit,
+                            CoordinateUnit::Meter,
+                            "Meters",
+                        );
+                        ui.selectable_value(
+                            &mut self.params.coord_unit,
+                            CoordinateUnit::Centimeter,
+                            "Centimeters",
+                        );
+                        ui.selectable_value(
+                            &mut self.params.coord_unit,
+                            CoordinateUnit::Millimeter,
+                            "Millimeters",
+                        );
+                        ui.selectable_value(
+                            &mut self.params.coord_unit,
+                            CoordinateUnit::Custom,
+                            "Custom",
+                        );
+                    });
+                if self.params.coord_unit == CoordinateUnit::Custom {
+                    ui.add(
+                        egui::Slider::new(
+                            &mut self.params.coord_custom_meters_per_unit,
+                            0.00001..=1000.0,
+                        )
+                        .logarithmic(true)
+                        .text("Meters per unit"),
+                    );
+                }
+                ui.label("Pore size is evaluated in physical coordinates and does not follow the viewport's fit-to-frame scale.");
                 ui.label("Ported from Skin Studio 2.4.76: three Voronoi pore populations, domain warp, generated tileable height, separate fine bump and micro grain.");
             }
             StudioTab::Reference => {
