@@ -1,4 +1,5 @@
 mod app;
+mod geometry;
 mod material;
 mod render;
 
