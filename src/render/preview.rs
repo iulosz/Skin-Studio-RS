@@ -180,7 +180,7 @@ impl SkinRenderResources {
             vertex: wgpu::VertexState {
                 module: &mesh_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[mesh_vertex_layout()],
+                buffers: &[Some(mesh_vertex_layout())],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -216,7 +216,7 @@ impl SkinRenderResources {
             vertex: wgpu::VertexState {
                 module: &grid_shader,
                 entry_point: Some("vs_main"),
-                buffers: &[mesh_vertex_layout()],
+                buffers: &[Some(mesh_vertex_layout())],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -269,7 +269,7 @@ impl SkinRenderResources {
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
         let display_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
