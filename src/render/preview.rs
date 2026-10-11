@@ -880,3 +880,16 @@ mod tests {
         assert!(camera.distance <= 30.0);
     }
 }
+
+    #[test]
+    fn mesh_shader_parses_and_validates_as_wgsl() {
+        let module = naga::front::wgsl::parse_str(MESH_SHADER)
+            .expect("mesh preview WGSL must parse");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("mesh preview WGSL must validate");
+    }
+}
