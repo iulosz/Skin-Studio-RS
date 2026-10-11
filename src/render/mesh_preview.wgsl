@@ -20,6 +20,7 @@ struct ViewportUniforms {
     chromatic_controls: vec4<f32>,
     chromatic_scales: vec4<f32>,
     mottled_controls: vec4<f32>,
+    albedo_controls: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -558,6 +559,76 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         clamp(reference_cavity * reference_color_strength, 0.0, 1.0)
     );
     base *= 1.0 - reference_cavity * reference_color_strength * 0.055;
+
+    // Port of SKIN_ALBEDO_REALISM_LAYER using imported UVs, with a safe
+    // bbox-coordinate fallback when the source mesh has no UV set.
+    let albedo_uv = mix(
+        input.region_position.xy,
+        input.uv_data.xy,
+        clamp(input.uv_data.z, 0.0, 1.0)
+    );
+    let albedo_position = vec3<f32>(albedo_uv, 0.371);
+    let realism_strength = clamp(u.albedo_controls.x, 0.0, 1.0);
+
+    let albedo_broad = value_noise3(albedo_position * 2.7);
+    let albedo_broad_ramp = mix(
+        vec3<f32>(0.92, 0.94, 0.96),
+        vec3<f32>(0.995, 0.985, 0.970),
+        smoothstep(0.24, 0.76, albedo_broad)
+    );
+    base = mix(base, base * albedo_broad_ramp, realism_strength);
+
+    let albedo_medium = value_noise3(albedo_position * 10.5);
+    let albedo_medium_ramp = mix(
+        vec3<f32>(0.955, 0.965, 0.975),
+        vec3<f32>(0.998, 0.992, 0.980),
+        smoothstep(0.28, 0.72, albedo_medium)
+    );
+    base = mix(base, base * albedo_medium_ramp, realism_strength);
+
+    let albedo_micro = value_noise3(albedo_position * 58.0);
+    let albedo_micro_ramp = mix(
+        vec3<f32>(0.985, 0.992, 1.000),
+        vec3<f32>(1.000, 0.998, 0.990),
+        smoothstep(0.34, 0.66, albedo_micro)
+    );
+    base = mix(
+        base,
+        base * albedo_micro_ramp,
+        realism_strength * clamp(u.albedo_controls.w, 0.0, 1.0)
+    );
+
+    let albedo_hemo_noise = value_noise3(albedo_position * 7.5);
+    let albedo_hemo_ramp = smoothstep(0.32, 0.68, albedo_hemo_noise * regions.hemoglobin);
+    let albedo_luminance = dot(base, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let albedo_hemo_tint = vec3<f32>(0.66, 0.22, 0.16)
+        * max(albedo_luminance, 0.0001) / 0.32;
+    base = mix(
+        base,
+        albedo_hemo_tint,
+        clamp(albedo_hemo_ramp * u.albedo_controls.y * realism_strength * 0.24, 0.0, 0.24)
+    );
+
+    let albedo_eye_noise = value_noise3(albedo_position * 5.0);
+    let albedo_eye_factor = regions.eye_area * albedo_eye_noise * 0.07;
+    base = mix(
+        base,
+        base * vec3<f32>(0.92, 0.98, 1.0),
+        clamp(albedo_eye_factor * realism_strength, 0.0, 0.07)
+    );
+
+    let albedo_melanin_noise = value_noise3(albedo_position * 2.2);
+    let albedo_melanin_ramp = mix(
+        vec3<f32>(0.965, 0.965, 0.955),
+        vec3<f32>(0.998, 0.995, 0.988),
+        smoothstep(0.28, 0.72, albedo_melanin_noise)
+    );
+    base = mix(
+        base,
+        base * albedo_melanin_ramp,
+        realism_strength * clamp(u.albedo_controls.z, 0.0, 1.0)
+    );
+    base = clamp(base, vec3<f32>(0.0), vec3<f32>(1.0));
 
     var color = base * diffuse;
     color += base * back_scatter * vec3<f32>(1.0, 0.48, 0.30);

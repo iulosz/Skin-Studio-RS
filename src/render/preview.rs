@@ -52,6 +52,7 @@ struct ViewportUniforms {
     chromatic_controls: [f32; 4],
     chromatic_scales: [f32; 4],
     mottled_controls: [f32; 4],
+    albedo_controls: [f32; 4],
 }
 
 struct GpuMesh {
@@ -799,6 +800,12 @@ impl SkinPreview {
                 if params.mottled_enable { params.mottled_strength } else { 0.0 },
                 params.mottled_variation,
                 params.mottled_contrast,
+            ],
+            albedo_controls: [
+                params.albedo_realism_strength,
+                params.albedo_hemoglobin_strength,
+                params.albedo_melanin_strength,
+                params.albedo_micro_variation_strength,
             ],
         };
 

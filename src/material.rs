@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fs, path::Path};
 
-pub const PRESET_SCHEMA_VERSION: u32 = 7;
+pub const PRESET_SCHEMA_VERSION: u32 = 8;
 
 /// Real-world length used by the source add-on's Coord Scale conversion.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +107,10 @@ pub struct SkinMaterial {
     pub golden_scale: f32,
     pub micro_color_strength: f32,
     pub micro_color_scale: f32,
+    pub albedo_realism_strength: f32,
+    pub albedo_hemoglobin_strength: f32,
+    pub albedo_melanin_strength: f32,
+    pub albedo_micro_variation_strength: f32,
 }
 
 impl Default for SkinMaterial {
@@ -181,6 +185,10 @@ impl Default for SkinMaterial {
             golden_scale: 9.0,
             micro_color_strength: 0.055,
             micro_color_scale: 55.0,
+            albedo_realism_strength: 0.72,
+            albedo_hemoglobin_strength: 0.32,
+            albedo_melanin_strength: 0.26,
+            albedo_micro_variation_strength: 0.18,
         }
     }
 }
@@ -266,6 +274,10 @@ impl SkinMaterial {
         validate_range("golden_scale", self.golden_scale, 2.0, 40.0)?;
         validate_range("micro_color_strength", self.micro_color_strength, 0.0, 1.0)?;
         validate_range("micro_color_scale", self.micro_color_scale, 10.0, 180.0)?;
+        validate_range("albedo_realism_strength", self.albedo_realism_strength, 0.0, 1.0)?;
+        validate_range("albedo_hemoglobin_strength", self.albedo_hemoglobin_strength, 0.0, 1.0)?;
+        validate_range("albedo_melanin_strength", self.albedo_melanin_strength, 0.0, 1.0)?;
+        validate_range("albedo_micro_variation_strength", self.albedo_micro_variation_strength, 0.0, 1.0)?;
         validate_range("roughness", self.roughness, 0.03, 1.0)?;
         validate_range("specular", self.specular, 0.0, 1.0)?;
         validate_range("subsurface", self.subsurface, 0.0, 0.7)?;
@@ -463,6 +475,17 @@ impl SkinPreset {
             6 => {
                 // Schema 6 introduced Skin Line Network. Multi-scale color controls
                 // inherit the original add-on defaults in schema 7.
+                let old: SkinPreset =
+                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                Self {
+                    schema_version: PRESET_SCHEMA_VERSION,
+                    name: old.name,
+                    material: old.material,
+                }
+            }
+            7 => {
+                // Schema 7 introduced the multi-scale color layer. Albedo Realism controls
+                // inherit the original add-on defaults in schema 8.
                 let old: SkinPreset =
                     serde_json::from_str(source).map_err(PresetError::Json)?;
                 Self {
@@ -693,6 +716,27 @@ mod tests {
         assert_eq!(migrated.material.erythema_strength, 0.11);
         assert_eq!(migrated.material.golden_scale, 9.0);
         assert_eq!(migrated.material.micro_color_scale, 55.0);
+    }
+
+    #[test]
+    fn migrates_v7_presets_and_initializes_albedo_realism_controls() {
+        let preset = SkinPreset::new("Schema 7", SkinMaterial::default()).unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&preset.to_json_pretty().unwrap()).unwrap();
+        value["schema_version"] = serde_json::Value::from(7);
+        let object = value["material"].as_object_mut().unwrap();
+        for key in [
+            "albedo_realism_strength",
+            "albedo_hemoglobin_strength",
+            "albedo_melanin_strength",
+            "albedo_micro_variation_strength",
+        ] { object.remove(key); }
+        let migrated = SkinPreset::from_json(&value.to_string()).unwrap();
+        assert_eq!(migrated.schema_version, PRESET_SCHEMA_VERSION);
+        assert_eq!(migrated.material.albedo_realism_strength, 0.72);
+        assert_eq!(migrated.material.albedo_hemoglobin_strength, 0.32);
+        assert_eq!(migrated.material.albedo_melanin_strength, 0.26);
+        assert_eq!(migrated.material.albedo_micro_variation_strength, 0.18);
     }
 
     #[test]
