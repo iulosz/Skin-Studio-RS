@@ -3,6 +3,37 @@ use std::{error::Error, fmt, fs, path::Path};
 
 pub const PRESET_SCHEMA_VERSION: u32 = 3;
 
+/// Real-world length used by the source add-on's Coord Scale conversion.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoordinateUnit {
+    #[default]
+    Meter,
+    Centimeter,
+    Millimeter,
+    Custom,
+}
+
+impl CoordinateUnit {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Meter => "Meters",
+            Self::Centimeter => "Centimeters",
+            Self::Millimeter => "Millimeters",
+            Self::Custom => "Custom",
+        }
+    }
+
+    pub fn meters_per_unit(self, custom: f32) -> f32 {
+        match self {
+            Self::Meter => 1.0,
+            Self::Centimeter => 0.01,
+            Self::Millimeter => 0.001,
+            Self::Custom => custom,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkinMaterial {
@@ -41,21 +72,23 @@ pub struct SkinMaterial {
     pub pore_vis_eye_area: f32,
     pub pore_vis_neck: f32,
     pub spec_pore_occlusion: f32,
+    pub coord_unit: CoordinateUnit,
+    pub coord_custom_meters_per_unit: f32,
 }
 
 impl Default for SkinMaterial {
     fn default() -> Self {
         Self {
-            base_color: [0.68, 0.43, 0.33],
+            base_color: [0.4948, 0.2102, 0.1229],
             pore_strength: 1.0,
-            roughness: 0.58,
-            specular: 0.24,
-            subsurface: 0.18,
+            roughness: 0.46,
+            specular: 0.50,
+            subsurface: 0.095,
             micro_relief: 0.35,
-            hemoglobin_strength: 0.28,
-            freckle_strength: 0.12,
-            oiliness: 0.22,
-            pigment_variation: 0.35,
+            hemoglobin_strength: 0.32,
+            freckle_strength: 0.0,
+            oiliness: 0.12,
+            pigment_variation: 0.12,
             pore_scale: 1.0,
             pore_color_strength: 0.15,
             pore_micro_detail: 0.38,
@@ -80,6 +113,8 @@ impl Default for SkinMaterial {
             pore_vis_eye_area: 0.25,
             pore_vis_neck: 0.5,
             spec_pore_occlusion: 0.55,
+            coord_unit: CoordinateUnit::Meter,
+            coord_custom_meters_per_unit: 1.0,
         }
     }
 }
@@ -121,6 +156,12 @@ impl SkinMaterial {
         validate_range("pore_vis_eye_area", self.pore_vis_eye_area, 0.0, 2.0)?;
         validate_range("pore_vis_neck", self.pore_vis_neck, 0.0, 2.0)?;
         validate_range("spec_pore_occlusion", self.spec_pore_occlusion, 0.0, 1.0)?;
+        validate_range(
+            "coord_custom_meters_per_unit",
+            self.coord_custom_meters_per_unit,
+            0.00001,
+            1000.0,
+        )?;
         validate_range("roughness", self.roughness, 0.03, 1.0)?;
         validate_range("specular", self.specular, 0.0, 1.0)?;
         validate_range("subsurface", self.subsurface, 0.0, 0.7)?;
