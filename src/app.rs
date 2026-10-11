@@ -1,6 +1,8 @@
 use eframe::egui;
-
-use crate::render::{SkinPreview, SkinPreviewParams};
+use crate::{
+    material::{SkinMaterial, SkinPreset, load_preset, save_preset},
+    render::SkinPreview,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum StudioTab {
@@ -40,9 +42,11 @@ impl StudioTab {
 pub struct SkinStudioApp {
     active_tab: StudioTab,
     preview: SkinPreview,
-    params: SkinPreviewParams,
+    params: SkinMaterial,
     show_grid: bool,
     status: String,
+    preset_path: String,
+    preset_name: String,
 }
 
 impl SkinStudioApp {
@@ -50,9 +54,36 @@ impl SkinStudioApp {
         Self {
             active_tab: StudioTab::Color,
             preview: SkinPreview::new(cc),
-            params: SkinPreviewParams::default(),
+            params: SkinMaterial::default(),
             show_grid: true,
             status: "Ready · GPU material preview".to_owned(),
+            preset_path: "skin_studio_preset.json".to_owned(),
+            preset_name: "My Skin".to_owned(),
+        }
+    }
+
+    fn save_current_preset(&mut self) {
+        let preset = match SkinPreset::new(self.preset_name.trim(), self.params) {
+            Ok(preset) => preset,
+            Err(error) => {
+                self.status = format!("Preset not saved: {error}");
+                return;
+            }
+        };
+        match save_preset(&self.preset_path, &preset) {
+            Ok(()) => self.status = format!("Preset saved: {}", self.preset_path),
+            Err(error) => self.status = format!("Preset save failed: {error}"),
+        }
+    }
+
+    fn load_current_preset(&mut self) {
+        match load_preset(&self.preset_path) {
+            Ok(preset) => {
+                self.params = preset.material;
+                self.preset_name = preset.name;
+                self.status = format!("Preset loaded: {}", self.preset_path);
+            }
+            Err(error) => self.status = format!("Preset load failed: {error}"),
         }
     }
 
@@ -62,15 +93,24 @@ impl SkinStudioApp {
             ui.label(egui::RichText::new("RS  ·  0.1.0").weak());
             ui.separator();
             if ui.button("Reset material").clicked() {
-                self.params = SkinPreviewParams::default();
+                self.params = SkinMaterial::default();
                 self.status = "Material values restored to defaults".to_owned();
-            }
-            if ui.button("Save preset").clicked() {
-                self.status = "Preset serialization is planned for the next milestone".to_owned();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(egui::RichText::new("CUSTOM WGPU PREVIEW").small().weak());
             });
+        });
+        ui.horizontal(|ui| {
+            ui.label("Preset name");
+            ui.add(egui::TextEdit::singleline(&mut self.preset_name).desired_width(130.0));
+            ui.label("JSON file");
+            ui.add(egui::TextEdit::singleline(&mut self.preset_path).desired_width(250.0));
+            if ui.button("Save preset").clicked() {
+                self.save_current_preset();
+            }
+            if ui.button("Load preset").clicked() {
+                self.load_current_preset();
+            }
         });
     }
 
