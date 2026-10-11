@@ -11,8 +11,8 @@ env:
 
 jobs:
   check:
-    name: Format, tests and compile
-    runs-on: ubuntu-latest
+    name: Windows build, tests and package
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -25,3 +25,10 @@ jobs:
         run: cargo test --all-targets
       - name: Compile release
         run: cargo build --release
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Skin-Studio-RS-Windows-x64
+          path: target/release/skin-studio-rs.exe
+          if-no-files-found: error
+          retention-days: 14
