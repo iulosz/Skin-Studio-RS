@@ -359,13 +359,14 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     let primary_network = voronoi_f1_edge_3d(network_coord * line_scale);
     let secondary_network = voronoi_f1_edge_3d(network_coord * line_scale * 2.35);
+    let crease_network = voronoi_f1_edge_3d(network_coord * (line_scale / 5.68));
     let shoulder_width = line_thickness * 1.6;
     let plateau = smoothstep(0.0, max(shoulder_width, 0.0001), primary_network.y);
     let dome = 1.0 - 0.6 * primary_network.x * primary_network.x;
     let cell_tilt = primary_network.z * 0.08;
     let crease_mask_noise = value_noise3(network_coord * 6.0);
     let crease_mask = smoothstep(0.50, 0.66, crease_mask_noise);
-    let crease_groove = 1.0 - smoothstep(0.0, 0.056, secondary_network.y);
+    let crease_groove = 1.0 - smoothstep(0.0, 0.056, crease_network.y);
     let network_height = plateau * 1.3 + dome * 0.35 + cell_tilt
         - crease_groove * crease_mask
         + (value_noise3(network_coord * line_scale * 3.0) - 0.5) * 1.2;
