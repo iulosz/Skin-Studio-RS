@@ -397,7 +397,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         clamp(u.reference_aux.z, 0.0, 1.0)
     );
     let perturbed_normal = bump_from_height(
-        micro_normal,
+        network_normal,
         metric_position,
         reference_height,
         max(u.reference_controls.y, 0.0),
