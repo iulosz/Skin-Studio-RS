@@ -14,13 +14,13 @@ Aplicativo desktop independente em Rust, criado para reconstruir gradualmente os
 - Shader WGSL com três populações Voronoi, projeção triplanar do height map, fine detail, micro-grain e oclusão especular dos poros.
 - GitHub Actions com verificação de formato, testes e builds de release para Windows, Linux e macOS.
 
-**Ainda não é a conversão completa do addon.** O primeiro subsistema de poros está portado, mas as máscaras anatômicas ainda são heurísticas baseadas no bounding box e assumem uma cabeça voltada para -Y. Coord Scale/units, Skin Line Network, crosshatch, reference height, pigmentação anatômica, vascularização, lábios, SSS, cabelo e bake continuam no roadmap. A compilação não substitui comparação visual com o Blender.
+**Ainda não é a conversão completa do addon.** O primeiro subsistema de poros está portado, mas as máscaras anatômicas ainda são heurísticas baseadas no bounding box e assumem uma cabeça voltada para -Y. Coord Scale agora inclui M/CM/MM/custom; Skin Line Network, crosshatch, reference height, pigmentação anatômica, vascularização, lábios, SSS, cabelo e bake continuam no roadmap. A compilação não substitui comparação visual com o Blender.
 
 ## Editor de pele — primeira etapa
 
 O painel de propriedades expõe controles para Base Color, tonalidade aproximada de hemoglobina, variação de pigmentação, poros, micro-relevo, sardas, rugosidade, especular, oleosidade e subsurface. Os ajustes são enviados em tempo real ao shader WGSL da pré-visualização.
 
-Os parâmetros são salvos em presets JSON versão 3. Presets versões 1 e 2 são migrados automaticamente, preservando os valores antigos e preenchendo os controles novos com padrões derivados do `__init__.py` original. Hemoglobina e sardas são efeitos procedurais de look development; ainda não representam máscaras anatômicas ou texturas calibradas.
+Os parâmetros são salvos em presets JSON versão 4. Presets versões 1, 2 e 3 são migrados automaticamente, preservando os valores antigos e preenchendo os controles novos com padrões derivados do `__init__.py` original. Hemoglobina e sardas são efeitos procedurais de look development; ainda não representam máscaras anatômicas ou texturas calibradas.
 
 ## Tecnologias
 
