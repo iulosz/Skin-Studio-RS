@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fs, path::Path};
 
-pub const PRESET_SCHEMA_VERSION: u32 = 5;
+pub const PRESET_SCHEMA_VERSION: u32 = 6;
 
 /// Real-world length used by the source add-on's Coord Scale conversion.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +83,11 @@ pub struct SkinMaterial {
     pub reference_color: f32,
     pub reference_rough: f32,
     pub reference_regional: f32,
+    pub skin_line_strength: f32,
+    pub skin_line_scale: f32,
+    pub skin_line_thickness: f32,
+    pub skin_line_relief: f32,
+    pub skin_line_shading: f32,
 }
 
 impl Default for SkinMaterial {
@@ -133,6 +138,11 @@ impl Default for SkinMaterial {
             reference_color: 0.0,
             reference_rough: 0.0,
             reference_regional: 0.0,
+            skin_line_strength: 0.6,
+            skin_line_scale: 80.0,
+            skin_line_thickness: 0.35,
+            skin_line_relief: 1.0,
+            skin_line_shading: 0.18,
         }
     }
 }
@@ -195,6 +205,11 @@ impl SkinMaterial {
         validate_range("reference_color", self.reference_color, 0.0, 1.0)?;
         validate_range("reference_rough", self.reference_rough, 0.0, 0.6)?;
         validate_range("reference_regional", self.reference_regional, 0.0, 1.0)?;
+        validate_range("skin_line_strength", self.skin_line_strength, 0.0, 1.5)?;
+        validate_range("skin_line_scale", self.skin_line_scale, 4.0, 400.0)?;
+        validate_range("skin_line_thickness", self.skin_line_thickness, 0.05, 1.0)?;
+        validate_range("skin_line_relief", self.skin_line_relief, 0.1, 8.0)?;
+        validate_range("skin_line_shading", self.skin_line_shading, 0.0, 1.0)?;
         validate_range("roughness", self.roughness, 0.03, 1.0)?;
         validate_range("specular", self.specular, 0.0, 1.0)?;
         validate_range("subsurface", self.subsurface, 0.0, 0.7)?;
@@ -378,6 +393,17 @@ impl SkinPreset {
                     material: old.material,
                 }
             }
+            5 => {
+                // Schema 5 added the source Reference Height controls. Skin Line
+                // Network controls inherit the original add-on defaults in schema 6.
+                let old: SkinPreset =
+                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                Self {
+                    schema_version: PRESET_SCHEMA_VERSION,
+                    name: old.name,
+                    material: old.material,
+                }
+            }
             PRESET_SCHEMA_VERSION => serde_json::from_str(source).map_err(PresetError::Json)?,
             version => return Err(PresetError::UnsupportedVersion(version)),
         };
@@ -543,6 +569,33 @@ mod tests {
         assert_eq!(migrated.material.reference_cell_mm, 1.16);
         assert_eq!(migrated.material.reference_resolution, 1024);
         assert_eq!(migrated.material.reference_seed, 11);
+    }
+
+    #[test]
+    fn migrates_v5_presets_and_initializes_skin_line_controls() {
+        let preset = SkinPreset::new("Schema 5", SkinMaterial::default()).unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&preset.to_json_pretty().unwrap()).unwrap();
+        value["schema_version"] = serde_json::Value::from(5);
+        let object = value["material"]
+            .as_object_mut()
+            .expect("preset material should be a JSON object");
+        for key in [
+            "skin_line_strength",
+            "skin_line_scale",
+            "skin_line_thickness",
+            "skin_line_relief",
+            "skin_line_shading",
+        ] {
+            object.remove(key);
+        }
+        let migrated = SkinPreset::from_json(&value.to_string()).unwrap();
+        assert_eq!(migrated.schema_version, PRESET_SCHEMA_VERSION);
+        assert_eq!(migrated.material.skin_line_strength, 0.6);
+        assert_eq!(migrated.material.skin_line_scale, 80.0);
+        assert_eq!(migrated.material.skin_line_thickness, 0.35);
+        assert_eq!(migrated.material.skin_line_relief, 1.0);
+        assert_eq!(migrated.material.skin_line_shading, 0.18);
     }
 
     #[test]

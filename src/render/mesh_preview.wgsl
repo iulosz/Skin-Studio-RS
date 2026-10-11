@@ -13,6 +13,8 @@ struct ViewportUniforms {
     coordinate_controls: vec4<f32>,
     reference_controls: vec4<f32>,
     reference_aux: vec4<f32>,
+    skin_line_controls: vec4<f32>,
+    skin_line_aux: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -114,6 +116,50 @@ fn voronoi_f1_3d(p: vec3<f32>) -> f32 {
         }
     }
     return nearest;
+}
+
+// Approximation of ShaderNodeTexVoronoi F1 + DISTANCE_TO_EDGE + Color.
+// The nearest and second-nearest feature points produce a signed-cell identity
+// and a distance to their bisector. This keeps cellular fields irregular while
+// avoiding the hard voxel boundaries of quantized hash noise.
+fn voronoi_f1_edge_3d(p: vec3<f32>) -> vec4<f32> {
+    let cell = floor(p);
+    let local = fract(p);
+    var nearest = 2.0;
+    var second = 2.0;
+    var nearest_delta = vec3<f32>(0.0);
+    var second_delta = vec3<f32>(0.0);
+    var cell_id = 0.0;
+
+    for (var z = -1; z <= 1; z = z + 1) {
+        for (var y = -1; y <= 1; y = y + 1) {
+            for (var x = -1; x <= 1; x = x + 1) {
+                let neighbor = vec3<f32>(f32(x), f32(y), f32(z));
+                let feature_cell = cell + neighbor;
+                let jitter = vec3<f32>(
+                    hash3(feature_cell + vec3<f32>(17.0, 53.0, 11.0)),
+                    hash3(feature_cell + vec3<f32>(29.0, 7.0, 43.0)),
+                    hash3(feature_cell + vec3<f32>(3.0, 31.0, 61.0))
+                );
+                let delta = local - (neighbor + jitter);
+                let distance_to_feature = length(delta);
+                if (distance_to_feature < nearest) {
+                    second = nearest;
+                    second_delta = nearest_delta;
+                    nearest = distance_to_feature;
+                    nearest_delta = delta;
+                    cell_id = hash3(feature_cell + vec3<f32>(71.0, 19.0, 37.0));
+                } else if (distance_to_feature < second) {
+                    second = distance_to_feature;
+                    second_delta = delta;
+                }
+            }
+        }
+    }
+
+    let bisector_distance = abs(second * second - nearest * nearest)
+        / max(2.0 * length(second_delta - nearest_delta), 0.0001);
+    return vec4<f32>(nearest, bisector_distance, cell_id, second);
 }
 
 // Box/triplanar projection mirrors the source's generated height image node.
@@ -297,6 +343,48 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         clamp(u.grain_controls.x, 0.0, 0.20)
     );
 
+    // Skin Line Network, ported from NET_TUNING / build_detail_layer():
+    // smooth cellular plateaus, curved sulci, two line scales and masked creases.
+    // This layer is distinct from pore openings and directional crosshatch grooves.
+    let line_strength = clamp(u.skin_line_controls.x, 0.0, 1.5);
+    let line_scale = clamp(u.skin_line_controls.y, 4.0, 400.0);
+    let line_thickness = clamp(u.skin_line_controls.z, 0.05, 1.0);
+    let line_relief = clamp(u.skin_line_controls.w, 0.1, 8.0);
+    let network_warp = vec3<f32>(
+        value_noise3(skin_position * 5.5 + vec3<f32>(1.0, 0.0, 0.0)),
+        value_noise3(skin_position * 5.5 + vec3<f32>(0.0, 1.0, 1.0)),
+        0.0
+    ) * 0.045;
+    let network_coord = skin_position + network_warp;
+
+    let primary_network = voronoi_f1_edge_3d(network_coord * line_scale);
+    let secondary_network = voronoi_f1_edge_3d(network_coord * line_scale * 2.35);
+    let shoulder_width = line_thickness * 1.6;
+    let plateau = smoothstep(0.0, max(shoulder_width, 0.0001), primary_network.y);
+    let dome = 1.0 - 0.6 * primary_network.x * primary_network.x;
+    let cell_tilt = primary_network.z * 0.08;
+    let crease_mask_noise = value_noise3(network_coord * 6.0);
+    let crease_mask = smoothstep(0.50, 0.66, crease_mask_noise);
+    let crease_groove = 1.0 - smoothstep(0.0, 0.056, secondary_network.y);
+    let network_height = plateau * 1.3 + dome * 0.35 + cell_tilt
+        - crease_groove * crease_mask
+        + (value_noise3(network_coord * line_scale * 3.0) - 0.5) * 1.2;
+
+    let primary_line = 1.0 - smoothstep(0.0, max(line_thickness * 0.18, 0.0001), primary_network.y);
+    let secondary_line = (1.0 - smoothstep(
+        0.0, max(line_thickness * 0.18, 0.0001), secondary_network.y
+    )) * 0.55;
+    let network_lines = max(primary_line, secondary_line);
+    let network_region = network_lines * regions.visibility;
+    let network_shading = network_region * clamp(u.skin_line_aux.x, 0.0, 1.0);
+    let network_normal = bump_from_height(
+        micro_normal,
+        metric_position,
+        network_height,
+        line_relief * 0.00015 * (190.0 / line_scale),
+        clamp(line_strength * regions.visibility, 0.0, 1.0)
+    );
+
     // Independent tileable Reference Height layer, ported from _ref_skin_height().
     // Reference strength is zero by default and is not coupled to Pore Strength.
     let reference_height = sample_reference_height(
@@ -342,6 +430,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     pigment += fine_variation * variation * 0.035;
     pigment += grain_variation * clamp(u.grain_controls.w, 0.0, 1.0) * 0.025;
     pigment -= pore_color_mask * 0.15;
+    pigment -= network_shading * 0.10;
     var base = clamp(u.base_color.rgb * pigment, vec3<f32>(0.0), vec3<f32>(1.0));
 
     let blood_noise = value_noise3(skin_position * 23.0);

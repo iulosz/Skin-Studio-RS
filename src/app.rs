@@ -230,6 +230,29 @@ impl SkinStudioApp {
                 ui.label("These controls update the GPU preview immediately. Regional anatomy and calibrated pigment layers are not implemented yet.");
             }
             StudioTab::Detail => {
+                ui.label(egui::RichText::new("Skin Line Network").strong());
+                ui.add(
+                    egui::Slider::new(&mut self.params.skin_line_strength, 0.0..=1.5)
+                        .text("Network strength"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.skin_line_scale, 4.0..=400.0)
+                        .text("Cell scale"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.skin_line_thickness, 0.05..=1.0)
+                        .text("Groove thickness"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.skin_line_relief, 0.1..=8.0)
+                        .text("Network relief"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.skin_line_shading, 0.0..=1.0)
+                        .text("Groove shading"),
+                );
+                ui.label("This is the cellular sulci-cutis network, separate from pore openings and directional crosshatch.");
+                ui.separator();
                 ui.label(egui::RichText::new("Layered pore system").strong());
                 ui.add(
                     egui::Slider::new(&mut self.params.pore_strength, 0.0..=2.0)

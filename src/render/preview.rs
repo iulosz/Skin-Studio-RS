@@ -45,6 +45,8 @@ struct ViewportUniforms {
     coordinate_controls: [f32; 4],
     reference_controls: [f32; 4],
     reference_aux: [f32; 4],
+    skin_line_controls: [f32; 4],
+    skin_line_aux: [f32; 4],
 }
 
 struct GpuMesh {
@@ -752,6 +754,13 @@ impl SkinPreview {
                 params.reference_regional,
                 params.reference_relief,
             ],
+            skin_line_controls: [
+                params.skin_line_strength,
+                params.skin_line_scale,
+                params.skin_line_thickness,
+                params.skin_line_relief,
+            ],
+            skin_line_aux: [params.skin_line_shading, 0.0, 0.0, 0.0],
         };
 
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(

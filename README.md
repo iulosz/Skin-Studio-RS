@@ -13,6 +13,7 @@ Aplicativo desktop independente em Rust, criado para reconstruir gradualmente os
 - Controles de poros portados do Skin Studio 2.4.76: intensidade, escala, irregularidade, variação de tamanho, mapa de altura tileável, seed e relevo.
 - Shader WGSL com três populações Voronoi, projeção triplanar do height map de poros, fine detail, micro-grain e oclusão especular.
 - Gerador independente de Reference Height em Rust, com rede Voronoi em duas escalas, sulcos, poros nas junções e ruído periódico por FFT; a textura é enviada à GPU como R16Float não-color.
+- Skin Line Network no WGSL: células em platôs, sulcos primários/secundários, vincos mascarados por ruído, controle de escala física e sombreado dos sulcos.
 - GitHub Actions com verificação de formato, testes e builds de release para Windows, Linux e macOS.
 
 **Ainda não é a conversão completa do addon.** O primeiro subsistema de poros está portado, mas as máscaras anatômicas ainda são heurísticas baseadas no bounding box e assumem uma cabeça voltada para -Y. Coord Scale agora inclui M/CM/MM/custom; Skin Line Network, crosshatch, estilo LEATHER do mapa de referência, pigmentação anatômica, vascularização, lábios, SSS, cabelo e bake continuam no roadmap. A compilação não substitui comparação visual com o Blender.
@@ -21,7 +22,7 @@ Aplicativo desktop independente em Rust, criado para reconstruir gradualmente os
 
 O painel de propriedades expõe controles para Base Color, tonalidade aproximada de hemoglobina, variação de pigmentação, poros, micro-relevo, sardas, rugosidade, especular, oleosidade e subsurface. Os ajustes são enviados em tempo real ao shader WGSL da pré-visualização.
 
-Os parâmetros são salvos em presets JSON versão 5. Presets versões 1 a 4 são migrados automaticamente, preservando os valores antigos e preenchendo os controles novos com padrões derivados do `__init__.py` original. Hemoglobina e sardas são efeitos procedurais de look development; ainda não representam máscaras anatômicas ou texturas calibradas.
+Os parâmetros são salvos em presets JSON versão 6. Presets versões 1 a 5 são migrados automaticamente, preservando os valores antigos e preenchendo os controles novos com padrões derivados do `__init__.py` original. Hemoglobina e sardas são efeitos procedurais de look development; ainda não representam máscaras anatômicas ou texturas calibradas.
 
 ## Tecnologias
 
