@@ -1,0 +1,45 @@
+# Roadmap — migração Skin Studio 2.4.76 para Rust
+
+## M0 — Fundação desktop e GPU
+- [x] Aplicativo desktop sem dependência do Blender em runtime.
+- [x] UI com as sete áreas principais do addon.
+- [x] Renderer WGSL procedural no viewport.
+- [x] Controles vivos para cor, poros, micro-relevo, roughness e especular.
+- [x] GitHub Actions para testes e builds Windows/Linux/macOS.
+- [ ] Executar o primeiro build no runner do GitHub e corrigir qualquer incompatibilidade de toolchain/driver que surgir.
+
+## M1 — Dados, presets e estabilidade
+- [ ] Estruturas Rust tipadas para parâmetros de material.
+- [ ] Serialização de presets em JSON/RON, com versionamento.
+- [ ] Configuração e histórico de alterações.
+- [ ] Testes unitários para faixas válidas, defaults e migração de preset.
+
+## M2 — Malhas e viewport 3D
+- [ ] Importar glTF/GLB e OBJ.
+- [ ] Criar buffers, câmera orbital, zoom/pan, grade real e seleção de objeto.
+- [ ] Normais/tangentes corretas e depth buffer.
+- [ ] Interface preparada para receber novas referências visuais do usuário.
+
+## M3 — Material de pele
+- [ ] Base Color por pigmentação em escalas múltiplas.
+- [ ] Portar a calibração Scalp do Skin Studio 2.4.76 sem regressão: Hue +0.0056, Saturation 0.8658, Value 0.9129; validar os alvos de cor documentados na cabeça de teste.
+- [ ] Máscaras anatômicas e mistura suave entre regiões.
+- [ ] Poros grandes, primários e finos com relevo controlável.
+- [ ] Skin Line Network e mapa de altura de referência tileável.
+- [ ] Lábios, olheiras, vascularização, sardas e microvariação.
+- [ ] Roughness, specular/coat e subsurface com limites calibrados.
+- [ ] Comparação visual automatizada por imagens de referência controladas.
+- [ ] Testes de regressão para os parâmetros/tabelas calibrados existentes no código e no changelog 2.4.76.
+
+## M4 — Texturas
+- [ ] Bake Base Color.
+- [ ] Bake Normal em tangent space.
+- [ ] Bake Roughness.
+- [ ] Margem/padding, prevenção de seams/halos, resolução configurável e exportação PNG.
+- [ ] Alpha quando necessário e com semântica definida.
+
+## M5 — Render final e distribuição
+- [ ] Render de qualidade superior separado da pré-visualização interativa.
+- [ ] Iluminação configurável, sombras e gerenciamento de cor.
+- [ ] Profiling de CPU/GPU e tratamento de dispositivos sem suporte.
+- [ ] Instalador/empacotamento por plataforma e releases versionadas.

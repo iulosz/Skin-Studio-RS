@@ -1,0 +1,11 @@
+[package]
+name = "skin-studio-rs"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+description = "Standalone procedural skin material studio with a custom wgpu preview renderer"
+license = "MIT"
+
+[dependencies]
+eframe = { version = "0.36.2", default-features = true, features = ["wgpu"] }
+bytemuck = { version = "1.25", features = ["derive"] }

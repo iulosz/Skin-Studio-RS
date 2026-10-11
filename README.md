@@ -1,0 +1,51 @@
+# Skin Studio RS
+
+Aplicativo desktop independente em Rust, criado para reconstruir gradualmente os recursos do Skin Studio 2.4.76 sem depender do Blender no runtime.
+
+## Estado atual — protótipo 0.1.0
+
+- Interface desktop em Rust com navegação Setup, Color, Detail, Reference, Surface, Hair e Bake.
+- Pré-visualização de material usando shader WGSL próprio executado por `wgpu`.
+- Esfera procedural renderizada diretamente na GPU para validar a iluminação e os controles de material.
+- Controles funcionais de cor base, intensidade dos poros, micro-relevo, roughness, specular e uma aproximação simples de subsurface.
+- GitHub Actions com verificação de formato, testes e builds de release para Windows, Linux e macOS.
+
+**Ainda não é a conversão completa do addon.** Importação de malhas, shader anatômico equivalente, máscaras regionais e exportação de texturas ainda serão desenvolvidos. O parâmetro de viewport grid é apenas um item de interface neste protótipo.
+
+## Tecnologias
+
+- Rust stable (a versão atual do `eframe` requer Rust 1.95 ou superior).
+- `egui` / `eframe` para a interface.
+- `wgpu` e WGSL para o renderizador GPU próprio do aplicativo.
+- `bytemuck` para empacotar uniformes enviados ao shader.
+
+## Executar localmente
+
+Instale Rust stable com `rustup` e depois, na raiz do repositório:
+
+```bash
+cargo fmt --all
+cargo test --all-targets
+cargo run --release
+```
+
+O primeiro build baixa as dependências do Cargo. No Linux, a janela precisa das bibliotecas de sistema usadas por winit/wgpu; o workflow instala as dependências no runner do GitHub Actions.
+
+## Build no GitHub
+
+1. Crie um repositório vazio no GitHub.
+2. Extraia este pacote e envie todos os arquivos para a branch `main`.
+3. Abra **Actions** e acompanhe `Build Skin Studio RS`.
+4. Os executáveis de cada sistema aparecerão como artefatos da execução.
+5. Para gerar uma Release com os binários anexados, crie e envie uma tag, por exemplo:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+O workflow compila para os sistemas operacionais usando runners do GitHub. Isso não garante compatibilidade com toda placa de vídeo; os drivers locais precisam implementar um backend suportado pelo `wgpu`.
+
+## Direção de desenvolvimento
+
+Veja [`docs/ROADMAP.md`](docs/ROADMAP.md) e [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
