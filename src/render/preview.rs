@@ -63,7 +63,7 @@ impl ViewportTarget {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -186,7 +186,7 @@ impl SkinRenderResources {
             fragment: Some(wgpu::FragmentState {
                 module: &mesh_shader,
                 entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::TextureFormat::Rgba8Unorm.into())],
+                targets: &[Some(wgpu::TextureFormat::Rgba8UnormSrgb.into())],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
             primitive: wgpu::PrimitiveState {
