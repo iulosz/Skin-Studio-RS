@@ -6,7 +6,10 @@ Aplicativo desktop independente em Rust, criado para reconstruir gradualmente os
 
 - Interface desktop em Rust com navegação Setup, Color, Detail, Reference, Surface, Hair e Bake.
 - Pré-visualização de material usando shader WGSL próprio executado por `wgpu`.
-- Esfera procedural renderizada diretamente na GPU para validar a iluminação e os controles de material.
+- Viewport rasterizado de malhas triangulares com teste de profundidade e grade real.
+- Importação de malhas OBJ, glTF e GLB, com centralização e escala automáticas.
+- Câmera orbital com zoom, pan e restauração de enquadramento.
+- Esfera de demonstração como malha padrão para ajustar o material antes da importação de um modelo.
 - Controles funcionais de cor base, intensidade dos poros, micro-relevo, roughness, specular e uma aproximação simples de subsurface.
 - GitHub Actions com verificação de formato, testes e builds de release para Windows, Linux e macOS.
 
