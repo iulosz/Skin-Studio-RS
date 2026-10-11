@@ -11,7 +11,7 @@
 ## M1 — Dados, presets e estabilidade
 - [x] Estruturas Rust tipadas para parâmetros de material.
 - [x] Serialização de presets JSON com versionamento.
-- [x] Presets versões 1 a 6 migrados automaticamente para o esquema atual.
+- [x] Presets versões 1 a 7 migrados automaticamente para o esquema atual.
 - [x] Testes unitários para faixas válidas, defaults e migração de preset.
 
 ## M1.5 — Editor inicial de parâmetros de pele
@@ -44,7 +44,8 @@
 - [ ] Portar o estilo LEATHER da Reference Height com seus parâmetros e calibração independentes.
 - [x] Portar Skin Line Network com platôs, sulcos celulares em duas escalas, vincos e ajuste físico de relevo.
 - [x] Portar build_color_layer(): variação macro, melanina, eritema, ouro, microcor, vermelhidão e Mottled em três escalas.
-- [ ] Portar a camada UV-based Albedo Realism com masks regionais e separação cromática.
+- [x] Portar broad/medium/micro Albedo Realism e canais hemoglobina/periorbital/melanina; preservar UVs OBJ/glTF.
+- [ ] Substituir máscaras regionais heurísticas por máscaras anatômicas importadas ou pintáveis.
 - [ ] Portar crosshatch direcional e micro-rugas com escala, orientação, breakup e contribuição para roughness.
 - [ ] Skin Line Network, crosshatch e micro-rugas; portar parâmetros e algoritmo sem simplificação silenciosa.
 - [ ] Lábios, olheiras, vascularização, sardas e microvariação.

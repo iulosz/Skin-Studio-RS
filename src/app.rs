@@ -303,8 +303,26 @@ impl SkinStudioApp {
                             .text("Spot contrast"),
                     );
                 }
+                ui.separator();
+                ui.label(egui::RichText::new("UV-based Albedo Realism").strong());
+                ui.add(
+                    egui::Slider::new(&mut self.params.albedo_realism_strength, 0.0..=1.0)
+                        .text("Realism strength"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.albedo_hemoglobin_strength, 0.0..=1.0)
+                        .text("Hemoglobin chroma"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.albedo_melanin_strength, 0.0..=1.0)
+                        .text("Melanin micro-variation"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut self.params.albedo_micro_variation_strength, 0.0..=1.0)
+                        .text("Micro-color variation"),
+                );
                 ui.add_space(6.0);
-                ui.label("Ported color layers: broad tone, melanin, erythema, golden tone, micro color, redness and three-scale mottled pigmentation. The dedicated UV-based Albedo Realism layer and painted masks are a separate stage.");
+                ui.label("UV-based albedo variation uses OBJ vt / glTF TEXCOORD_0. Meshes without UVs use bbox coordinates; anatomical masks are still approximated by head-oriented heuristics.");
             }
             StudioTab::Detail => {
                 ui.label(egui::RichText::new("Skin Line Network").strong());
