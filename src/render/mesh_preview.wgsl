@@ -10,6 +10,7 @@ struct ViewportUniforms {
     regional_a: vec4<f32>,
     regional_b: vec4<f32>,
     optical_controls: vec4<f32>,
+    coordinate_controls: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -208,6 +209,10 @@ fn region_detail(c: vec3<f32>) -> RegionDetail {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let normal = normalize(input.world_normal);
+    // Coordinate conversion from __init__.py: Object * (meters per unit / 0.22 m).
+    // This keeps pores at a stable physical size regardless of viewport framing.
+    let skin_position = input.skin_position
+        * (clamp(u.coordinate_controls.x, 0.00001, 1000.0) / 0.22);
     let light_direction = normalize(vec3<f32>(-0.48, 0.68, 0.85));
     let view_direction = normalize(u.camera_position.xyz - input.world_position);
     let half_vector = normalize(light_direction + view_direction);
@@ -221,8 +226,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // Original node chain: Noise(Color) * 0.055 * Pore Irregularity, added to
     // shared object-space skin coordinates before the three Voronoi populations.
-    let warp_color = value_noise_color(input.skin_position * 9.0);
-    let warped_coord = input.skin_position + warp_color * (0.055 * pore_irregularity);
+    let warp_color = value_noise_color(skin_position * 9.0);
+    let warped_coord = skin_position + warp_color * (0.055 * pore_irregularity);
 
     let primary_distance = voronoi_f1_3d(warped_coord * pore_micro_scale);
     let fine_distance = voronoi_f1_3d(warped_coord * pore_micro_scale * 1.72);
@@ -237,7 +242,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let large = large_opening * regions.large_pores;
     let pore_population = max(max(primary, fine), large);
 
-    let size_noise = value_noise3(input.skin_position * 4.8);
+    let size_noise = value_noise3(skin_position * 4.8);
     let size_factor = smoothstep(0.30, 0.70, size_noise) * pore_size_variation;
     let pore_shape = pore_population * size_factor;
     let pore_shape_master = pore_shape * pore_strength;
@@ -248,8 +253,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // Source's generated tileable height map (six tiles per 0.22 m at Pore Scale 1).
     // The image map and procedural openings remain separate bump contributions.
-    let map_height = sample_pore_height(input.skin_position, normal, 6.0 * pore_scale);
-    let metric_position = input.skin_position * 0.22;
+    let map_height = sample_pore_height(skin_position, normal, 6.0 * pore_scale);
+    let metric_position = skin_position * 0.22;
     let image_strength = clamp(pore_strength, 0.0, 1.0) * regions.visibility;
     let image_distance = 0.00024 * max(pore_strength, 1.0);
     let image_normal = bump_from_height(
@@ -265,12 +270,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // Fine Detail and Micro Grain reproduce the two separate source Bump nodes;
     // they remain lower amplitude than the shape-defining pore layer.
-    let fine_height = value_noise3(input.skin_position * clamp(u.pore_variation.w, 10.0, 500.0));
+    let fine_height = value_noise3(skin_position * clamp(u.pore_variation.w, 10.0, 500.0));
     let fine_normal = bump_from_height(
         procedural_normal, metric_position, fine_height, 0.022,
         clamp(u.pore_variation.z, 0.0, 0.5)
     );
-    let grain_height = value_noise3(input.skin_position * clamp(u.grain_controls.y, 50.0, 1000.0));
+    let grain_height = value_noise3(skin_position * clamp(u.grain_controls.y, 50.0, 1000.0));
     let perturbed_normal = bump_from_height(
         fine_normal, metric_position, grain_height, 0.008,
         clamp(u.grain_controls.x, 0.0, 0.20)
@@ -293,8 +298,8 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     // Continuous pigmentation replaces the square-cell hash that caused the
     // screenshot's large block-like patches. Grain is deliberately low contrast.
-    let broad_variation = value_noise3(input.skin_position * 10.0) - 0.5;
-    let fine_variation = value_noise3(input.skin_position * 68.0) - 0.5;
+    let broad_variation = value_noise3(skin_position * 10.0) - 0.5;
+    let fine_variation = value_noise3(skin_position * 68.0) - 0.5;
     let grain_variation = grain_height - 0.5;
     let variation = clamp(u.pigment_detail.w, 0.0, 1.0);
     var pigment = 1.0 + broad_variation * (0.025 + variation * 0.10);
@@ -303,14 +308,14 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     pigment -= pore_color_mask * 0.15;
     var base = clamp(u.base_color.rgb * pigment, vec3<f32>(0.0), vec3<f32>(1.0));
 
-    let blood_noise = value_noise3(input.skin_position * 23.0);
+    let blood_noise = value_noise3(skin_position * 23.0);
     let hemoglobin_mask = 0.35 + 0.65 * blood_noise;
     let hemoglobin_tint = base * vec3<f32>(1.10, 0.76, 0.72);
     base = mix(base, hemoglobin_tint, clamp(u.pigment_detail.x * hemoglobin_mask * 0.22, 0.0, 1.0));
 
     // Freckles remain a distinct color detail rather than being confused with pores.
-    let freckle_cell = floor(input.skin_position * 46.0);
-    let freckle_local = fract(input.skin_position * 46.0);
+    let freckle_cell = floor(skin_position * 46.0);
+    let freckle_local = fract(skin_position * 46.0);
     let freckle_center = vec3<f32>(
         hash3(freckle_cell + vec3<f32>(11.0, 3.0, 7.0)),
         hash3(freckle_cell + vec3<f32>(5.0, 17.0, 13.0)),
