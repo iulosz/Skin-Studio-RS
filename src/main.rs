@@ -2,6 +2,7 @@ mod app;
 mod geometry;
 mod material;
 mod render;
+mod reference_height;
 mod skin_detail;
 
 fn main() -> eframe::Result {
