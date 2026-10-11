@@ -62,6 +62,44 @@ pub struct SkinPreset {
     pub material: SkinMaterial,
 }
 
+#[derive(Debug, Deserialize)]
+struct PresetHeader {
+    schema_version: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SkinMaterialV1 {
+    base_color: [f32; 3],
+    pore_strength: f32,
+    roughness: f32,
+    specular: f32,
+    subsurface: f32,
+    micro_relief: f32,
+}
+
+impl From<SkinMaterialV1> for SkinMaterial {
+    fn from(old: SkinMaterialV1) -> Self {
+        Self {
+            base_color: old.base_color,
+            pore_strength: old.pore_strength,
+            roughness: old.roughness,
+            specular: old.specular,
+            subsurface: old.subsurface,
+            micro_relief: old.micro_relief,
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SkinPresetV1 {
+    schema_version: u32,
+    name: String,
+    material: SkinMaterialV1,
+}
+
 impl SkinPreset {
     pub fn new(name: impl Into<String>, material: SkinMaterial) -> Result<Self, PresetError> {
         let preset = Self {
@@ -89,7 +127,23 @@ impl SkinPreset {
     }
 
     pub fn from_json(source: &str) -> Result<Self, PresetError> {
-        let preset: Self = serde_json::from_str(source).map_err(PresetError::Json)?;
+        let header: PresetHeader = serde_json::from_str(source).map_err(PresetError::Json)?;
+        let preset = match header.schema_version {
+            1 => {
+                let old: SkinPresetV1 =
+                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                debug_assert_eq!(old.schema_version, 1);
+                Self {
+                    schema_version: PRESET_SCHEMA_VERSION,
+                    name: old.name,
+                    material: old.material.into(),
+                }
+            }
+            PRESET_SCHEMA_VERSION => {
+                serde_json::from_str(source).map_err(PresetError::Json)?
+            }
+            version => return Err(PresetError::UnsupportedVersion(version)),
+        };
         preset.validate()?;
         Ok(preset)
     }
@@ -167,6 +221,28 @@ mod tests {
         material.pore_strength = f32::NAN;
         assert!(material.validate().is_err());
         material.pore_strength = 1.2;
+        assert!(material.validate().is_err());
+    }
+
+    #[test]
+    fn migrates_v1_presets_and_keeps_existing_parameters() {
+        let json = r#"{"schema_version":1,"name":"Legacy","material":{"base_color":[0.4,0.25,0.18],"pore_strength":0.6,"roughness":0.7,"specular":0.3,"subsurface":0.2,"micro_relief":0.5}}"#;
+        let migrated = SkinPreset::from_json(json).unwrap();
+        assert_eq!(migrated.schema_version, PRESET_SCHEMA_VERSION);
+        assert_eq!(migrated.material.base_color, [0.4, 0.25, 0.18]);
+        assert_eq!(migrated.material.pore_strength, 0.6);
+        assert_eq!(migrated.material.hemoglobin_strength, SkinMaterial::default().hemoglobin_strength);
+        assert_eq!(migrated.material.freckle_strength, SkinMaterial::default().freckle_strength);
+        assert_eq!(migrated.material.oiliness, SkinMaterial::default().oiliness);
+    }
+
+    #[test]
+    fn validates_new_skin_editor_parameters() {
+        let mut material = SkinMaterial::default();
+        material.oiliness = 1.1;
+        assert!(material.validate().is_err());
+        material.oiliness = 0.5;
+        material.freckle_strength = f32::NAN;
         assert!(material.validate().is_err());
     }
 
