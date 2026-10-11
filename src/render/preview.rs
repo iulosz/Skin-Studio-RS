@@ -4,19 +4,21 @@ use bytemuck::{Pod, Zeroable};
 use eframe::egui;
 use eframe::egui_wgpu::{self, wgpu};
 use glam::{Mat4, Vec3};
+use half::f16;
 use wgpu::util::DeviceExt;
 
 use crate::{
     geometry::{MeshData, MeshVertex},
     material::SkinMaterial,
+    skin_detail::{PoreHeightMap, PoreMapError, PoreMapSettings},
 };
 
 const MESH_SHADER: &str = include_str!("mesh_preview.wgsl");
 const GRID_SHADER: &str = include_str!("grid.wgsl");
 const DISPLAY_SHADER: &str = include_str!("display.wgsl");
 
-const MESH_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 2] =
-    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
+const MESH_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3];
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -26,12 +28,21 @@ struct ViewportUniforms {
     base_color: [f32; 4],
     surface: [f32; 4],
     pigment_detail: [f32; 4],
+    pore_controls: [f32; 4],
+    pore_variation: [f32; 4],
+    grain_controls: [f32; 4],
 }
 
 struct GpuMesh {
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     index_count: u32,
+    revision: u64,
+}
+
+struct GpuPoreMap {
+    _texture: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
     revision: u64,
 }
 
@@ -115,6 +126,9 @@ struct SkinRenderResources {
     display_pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
+    pore_bind_group_layout: wgpu::BindGroupLayout,
+    pore_sampler: wgpu::Sampler,
+    pore_map: Option<GpuPoreMap>,
     display_bind_group_layout: wgpu::BindGroupLayout,
     display_sampler: wgpu::Sampler,
     grid_buffer: wgpu::Buffer,
@@ -165,13 +179,45 @@ impl SkinRenderResources {
             }],
         });
 
+        let pore_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Skin Studio linear pore-height texture layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let pore_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Skin Studio tileable pore-height sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
         let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Skin Studio PBR-like mesh preview shader"),
             source: wgpu::ShaderSource::Wgsl(MESH_SHADER.into()),
         });
         let mesh_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Skin Studio mesh pipeline layout"),
-            bind_group_layouts: &[Some(&uniform_layout)],
+            label: Some("Skin Studio mesh + pore-height pipeline layout"),
+            bind_group_layouts: &[Some(&uniform_layout), Some(&pore_bind_group_layout)],
             immediate_size: 0,
         });
         let mesh_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -210,9 +256,14 @@ impl SkinRenderResources {
             label: Some("Skin Studio viewport grid shader"),
             source: wgpu::ShaderSource::Wgsl(GRID_SHADER.into()),
         });
+        let grid_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Skin Studio grid pipeline layout"),
+            bind_group_layouts: &[Some(&uniform_layout)],
+            immediate_size: 0,
+        });
         let grid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Skin Studio depth-tested grid pipeline"),
-            layout: Some(&mesh_layout),
+            layout: Some(&grid_layout),
             vertex: wgpu::VertexState {
                 module: &grid_shader,
                 entry_point: Some("vs_main"),
@@ -317,6 +368,9 @@ impl SkinRenderResources {
             display_pipeline,
             uniform_buffer,
             uniform_bind_group,
+            pore_bind_group_layout,
+            pore_sampler,
+            pore_map: None,
             display_bind_group_layout: display_layout,
             display_sampler,
             grid_buffer,
@@ -337,18 +391,22 @@ fn make_grid_vertices() -> Vec<MeshVertex> {
         vertices.push(MeshVertex {
             position: [offset, floor_y, -half],
             normal: [0.0; 3],
+            skin_position: [offset, floor_y, -half],
         });
         vertices.push(MeshVertex {
             position: [offset, floor_y, half],
             normal: [0.0; 3],
+            skin_position: [offset, floor_y, half],
         });
         vertices.push(MeshVertex {
             position: [-half, floor_y, offset],
             normal: [0.0; 3],
+            skin_position: [-half, floor_y, offset],
         });
         vertices.push(MeshVertex {
             position: [half, floor_y, offset],
             normal: [0.0; 3],
+            skin_position: [half, floor_y, offset],
         });
     }
     vertices
@@ -414,17 +472,25 @@ pub struct SkinPreview {
     available: bool,
     mesh: Arc<MeshData>,
     mesh_revision: u64,
+    pore_map: Arc<PoreHeightMap>,
+    pore_map_revision: u64,
     camera: OrbitCamera,
 }
 
 impl SkinPreview {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mesh = Arc::new(MeshData::default_sphere());
+        let pore_map = Arc::new(
+            PoreHeightMap::generate(PoreMapSettings::default())
+                .expect("default pore-map settings must be valid"),
+        );
         let Some(state) = cc.wgpu_render_state.as_ref() else {
             return Self {
                 available: false,
                 mesh,
                 mesh_revision: 1,
+                pore_map,
+                pore_map_revision: 1,
                 camera: OrbitCamera::default(),
             };
         };
@@ -438,6 +504,8 @@ impl SkinPreview {
             available: true,
             mesh,
             mesh_revision: 1,
+            pore_map,
+            pore_map_revision: 1,
             camera: OrbitCamera::default(),
         }
     }
@@ -462,6 +530,13 @@ impl SkinPreview {
 
     pub fn reset_camera(&mut self) {
         self.camera.reset();
+    }
+
+    pub fn regenerate_pore_map(&mut self, settings: PoreMapSettings) -> Result<(), PoreMapError> {
+        let map = PoreHeightMap::generate(settings)?;
+        self.pore_map = Arc::new(map);
+        self.pore_map_revision = self.pore_map_revision.wrapping_add(1);
+        Ok(())
     }
 
     pub fn show(&mut self, ui: &mut egui::Ui, params: SkinMaterial, show_grid: bool) {
@@ -517,6 +592,24 @@ impl SkinPreview {
                 params.oiliness,
                 params.pigment_variation,
             ],
+            pore_controls: [
+                params.pore_scale,
+                params.pore_color_strength,
+                params.pore_micro_detail,
+                params.pore_micro_scale,
+            ],
+            pore_variation: [
+                params.pore_irregularity,
+                params.pore_size_variation,
+                params.fine_detail_strength,
+                params.fine_detail_scale,
+            ],
+            grain_controls: [
+                params.micro_grain_strength,
+                params.micro_grain_scale,
+                params.micro_grain_roughness,
+                params.micro_relief,
+            ],
         };
 
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
@@ -527,6 +620,8 @@ impl SkinPreview {
                 height,
                 mesh: Arc::clone(&self.mesh),
                 mesh_revision: self.mesh_revision,
+                pore_map: Arc::clone(&self.pore_map),
+                pore_map_revision: self.pore_map_revision,
                 show_grid,
             },
         ));
@@ -539,6 +634,8 @@ struct MeshPreviewCallback {
     height: u32,
     mesh: Arc<MeshData>,
     mesh_revision: u64,
+    pore_map: Arc<PoreHeightMap>,
+    pore_map_revision: u64,
     show_grid: bool,
 }
 
@@ -567,6 +664,73 @@ impl eframe::egui_wgpu::CallbackTrait for MeshPreviewCallback {
                 self.width,
                 self.height,
             ));
+        }
+
+        let needs_pore_map = resources
+            .pore_map
+            .as_ref()
+            .is_none_or(|map| map.revision != self.pore_map_revision);
+        if needs_pore_map {
+            let size = self.pore_map.resolution;
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Skin Studio generated pore height map (R16Float, non-color)"),
+                size: wgpu::Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let half_pixels: Vec<u16> = self
+                .pore_map
+                .values
+                .iter()
+                .map(|value| f16::from_f32(*value).to_bits())
+                .collect();
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                bytemuck::cast_slice(&half_pixels),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(size * std::mem::size_of::<u16>() as u32),
+                    rows_per_image: Some(size),
+                },
+                wgpu::Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+            );
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Skin Studio pore height texture binding"),
+                layout: &resources.pore_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&resources.pore_sampler),
+                    },
+                ],
+            });
+            resources.pore_map = Some(GpuPoreMap {
+                _texture: texture,
+                bind_group,
+                revision: self.pore_map_revision,
+            });
         }
 
         let needs_mesh = resources
@@ -642,6 +806,11 @@ impl eframe::egui_wgpu::CallbackTrait for MeshPreviewCallback {
             render_pass.draw(0..resources.grid_vertex_count, 0..1);
         }
         render_pass.set_pipeline(&resources.mesh_pipeline);
+        let pore_map = resources
+            .pore_map
+            .as_ref()
+            .expect("pore-height texture should be uploaded before the mesh pass");
+        render_pass.set_bind_group(1, &pore_map.bind_group, &[]);
         render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
         render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         render_pass.draw_indexed(0..mesh.index_count, 0, 0..1);
