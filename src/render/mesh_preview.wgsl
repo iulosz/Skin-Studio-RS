@@ -119,6 +119,16 @@ fn value_noise_color(p: vec3<f32>) -> vec3<f32> {
 // 3D Worley/Voronoi F1. The original Blender node evaluates a 3D cell lattice;
 // checking the surrounding 27 cells avoids visible repetition and box-shaped
 // artifacts. All three pore populations use this same deterministic field.
+// Fade detail whose cell footprint is smaller than the screen can resolve.
+// This prevents procedural pore fields from aliasing into bright/dark stippling.
+fn detail_visibility(position: vec3<f32>, frequency: f32) -> f32 {
+    let dx = length(dpdx(position * frequency));
+    let dy = length(dpdy(position * frequency));
+    let footprint = max(dx, dy);
+    return 1.0 - smoothstep(0.42, 0.95, footprint);
+}
+
+// 3D Worley/Voronoi F1.
 fn voronoi_f1_3d(p: vec3<f32>) -> f32 {
     let cell = floor(p);
     let local = fract(p);
@@ -387,9 +397,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let primary_distance = voronoi_f1_3d(warped_coord * pore_micro_scale);
     let fine_distance = voronoi_f1_3d(warped_coord * pore_micro_scale * 1.72);
     let large_distance = voronoi_f1_3d(warped_coord * pore_micro_scale * 0.60);
-    let primary_opening = 1.0 - smoothstep(0.12, 0.235, primary_distance);
-    let fine_opening = 1.0 - smoothstep(0.075, 0.155, fine_distance);
-    let large_opening = 1.0 - smoothstep(0.12, 0.235, large_distance);
+    let primary_opening = (1.0 - smoothstep(0.12, 0.235, primary_distance))
+        * detail_visibility(warped_coord, pore_micro_scale);
+    let fine_opening = (1.0 - smoothstep(0.075, 0.155, fine_distance))
+        * detail_visibility(warped_coord, pore_micro_scale * 1.72);
+    let large_opening = (1.0 - smoothstep(0.12, 0.235, large_distance))
+        * detail_visibility(warped_coord, pore_micro_scale * 0.60);
 
     // Match the source's three regional populations and MAXIMUM mix.
     let primary = primary_opening * regions.primary_pores;
@@ -410,7 +423,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // The image map and procedural openings remain separate bump contributions.
     let map_height = sample_pore_height(skin_position, normal, 6.0 * pore_scale);
     let metric_position = skin_position * 0.22;
-    let image_strength = clamp(pore_strength, 0.0, 1.0) * regions.visibility;
+    let map_frequency = 6.0 * pore_scale * clamp(u.coordinate_controls.y, 5.0, 100.0);
+    let image_strength = clamp(pore_strength, 0.0, 1.0)
+        * regions.visibility * detail_visibility(skin_position, map_frequency);
     let image_distance = 0.00024 * max(pore_strength, 1.0);
     let image_normal = bump_from_height(
         normal, metric_position, map_height, image_distance, image_strength
@@ -420,20 +435,24 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     // is its strength; the mask also controls pore albedo and specular occlusion.
     let pore_micro_detail = clamp(u.pore_controls.z, 0.0, 1.0) * regions.visibility;
     let procedural_normal = bump_from_height(
-        image_normal, metric_position, pore_shape_master, 0.009, pore_micro_detail
+        image_normal, metric_position, pore_shape_master, 0.00065, pore_micro_detail
     );
 
     // Fine Detail and Micro Grain reproduce the two separate source Bump nodes;
     // they remain lower amplitude than the shape-defining pore layer.
     let fine_height = value_noise3(skin_position * clamp(u.pore_variation.w, 10.0, 500.0));
+    let fine_frequency = clamp(u.pore_variation.w, 10.0, 500.0);
     let fine_normal = bump_from_height(
         procedural_normal, metric_position, fine_height, 0.022,
         clamp(u.pore_variation.z, 0.0, 0.5)
+            * detail_visibility(skin_position, fine_frequency)
     );
-    let grain_height = value_noise3(skin_position * clamp(u.grain_controls.y, 50.0, 1000.0));
+    let grain_frequency = clamp(u.grain_controls.y, 50.0, 1000.0);
+    let grain_height = value_noise3(skin_position * grain_frequency);
     let micro_normal = bump_from_height(
         fine_normal, metric_position, grain_height, 0.008,
         clamp(u.grain_controls.x, 0.0, 0.20)
+            * detail_visibility(skin_position, grain_frequency)
     );
 
     // Skin Line Network, ported from NET_TUNING / build_detail_layer():
@@ -470,13 +489,15 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     )) * 0.55;
     let network_lines = max(primary_line, secondary_line);
     let network_region = network_lines * regions.visibility;
-    let network_shading = network_region * clamp(u.skin_line_aux.x, 0.0, 1.0);
+    let network_visibility = detail_visibility(network_coord, line_scale);
+    let network_shading = network_region * clamp(u.skin_line_aux.x, 0.0, 1.0)
+        * network_visibility;
     let network_normal = bump_from_height(
         micro_normal,
         metric_position,
         network_height,
         line_relief * 0.00015 * (190.0 / line_scale),
-        clamp(line_strength * regions.visibility, 0.0, 1.0)
+        clamp(line_strength * regions.visibility * network_visibility, 0.0, 1.0)
     );
 
     // Independent tileable Reference Height layer, ported from _ref_skin_height().
@@ -498,10 +519,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         clamp(u.reference_controls.x * reference_region, 0.0, 1.0)
     );
 
-    let crosshatch_strength = clamp(u.crosshatch_controls.x, 0.0, 1.0) * regions.visibility;
+    let crosshatch_frequency = clamp(u.crosshatch_controls.y, 15.0, 600.0);
+    let crosshatch_strength = clamp(u.crosshatch_controls.x, 0.0, 1.0)
+        * regions.visibility * detail_visibility(skin_position, crosshatch_frequency);
     let crosshatch_height = 1.0 - crosshatch_height_triplanar(
         skin_position, normal,
-        clamp(u.crosshatch_controls.y, 15.0, 600.0),
+        crosshatch_frequency,
         clamp(u.crosshatch_controls.z, -180.0, 180.0) * 0.01745329252,
         clamp(u.crosshatch_controls.w, 0.0, 1.0)
     );
@@ -510,10 +533,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         0.000055 * clamp(u.crosshatch_aux.x, 0.1, 4.0),
         clamp(crosshatch_strength, 0.0, 1.0)
     );
-    let wrinkle_strength = clamp(u.wrinkle_controls.x, 0.0, 1.0) * regions.visibility;
+    let wrinkle_frequency = clamp(u.wrinkle_controls.y, 8.0, 400.0);
+    let wrinkle_strength = clamp(u.wrinkle_controls.x, 0.0, 1.0)
+        * regions.visibility * detail_visibility(skin_position, wrinkle_frequency);
     let wrinkle_height = 1.0 - wrinkle_height_triplanar(
         skin_position, normal,
-        clamp(u.wrinkle_controls.y, 8.0, 400.0),
+        wrinkle_frequency,
         clamp(u.wrinkle_controls.z, -180.0, 180.0) * 0.01745329252,
         clamp(u.wrinkle_controls.w, 0.0, 1.0),
         clamp(u.wrinkle_aux.z, 0.05, 0.5)
@@ -524,7 +549,10 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         clamp(wrinkle_strength, 0.0, 1.0)
     );
     let ndotl = max(dot(final_normal, light_direction), 0.0);
-    let diffuse = 0.25 + ndotl * 0.75;
+    let fill_direction = normalize(vec3<f32>(0.58, 0.28, 0.76));
+    let fill = max(dot(final_normal, fill_direction), 0.0);
+    // A soft fill approximates the broad environment illumination of the Blender preview.
+    let diffuse = 0.30 + ndotl * 0.52 + fill * 0.18;
     let oiliness = clamp(u.pigment_detail.z, 0.0, 1.0);
     let roughness = clamp(
         mix(u.surface.x, u.surface.x * 0.42, oiliness)
@@ -718,7 +746,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
     var color = base * diffuse;
     color += base * back_scatter * vec3<f32>(1.0, 0.48, 0.30);
-    color += vec3<f32>(1.0, 0.78, 0.63) * specular;
+    color += vec3<f32>(1.0, 0.91, 0.84) * specular;
     let fresnel = pow(1.0 - max(dot(final_normal, view_direction), 0.0), 3.0);
     color += base * fresnel * 0.055;
     color = color / (vec3<f32>(1.0) + max(color, vec3<f32>(0.0)) * 0.22);

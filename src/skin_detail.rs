@@ -8,8 +8,8 @@
 use std::{error::Error, f64::consts::PI, fmt};
 
 pub const DEFAULT_PORE_MAP_RESOLUTION: u32 = 1024;
-pub const DEFAULT_PORE_DENSITY: f32 = 35.0;
-pub const DEFAULT_PORE_RELIEF: f32 = 4.0;
+pub const DEFAULT_PORE_DENSITY: f32 = 28.0;
+pub const DEFAULT_PORE_RELIEF: f32 = 2.7;
 pub const DEFAULT_PORE_SEED: u32 = 42;
 
 /// Settings corresponding to the original add-on's Pore Resolution, Pore Density,
@@ -168,8 +168,8 @@ mod tests {
     fn defaults_match_original_addon_generator_settings() {
         let settings = PoreMapSettings::default();
         assert_eq!(settings.resolution, 1024);
-        assert_eq!(settings.density, 35.0);
-        assert_eq!(settings.relief, 4.0);
+        assert_eq!(settings.density, 28.0);
+        assert_eq!(settings.relief, 2.7);
         assert_eq!(settings.seed, 42);
     }
 
