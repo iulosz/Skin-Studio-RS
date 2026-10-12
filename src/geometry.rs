@@ -89,7 +89,7 @@ impl MeshData {
     }
 }
 
-/// Loads a mesh for the preview. Supported formats are Wavefront OBJ and glTF/GLB.
+/// Loads a mesh for the preview. Supports Wavefront OBJ, glTF/GLB and FBX.
 pub fn load_mesh(path: impl AsRef<Path>) -> Result<MeshData, MeshError> {
     let path = path.as_ref();
     let extension = path
@@ -104,6 +104,7 @@ pub fn load_mesh(path: impl AsRef<Path>) -> Result<MeshData, MeshError> {
             path.file_stem().and_then(|s| s.to_str()).unwrap_or("OBJ mesh"),
         )?,
         "gltf" | "glb" => load_gltf(path)?,
+        "fbx" => load_fbx(path)?,
         _ => return Err(MeshError::UnsupportedFormat(extension)),
     };
 
@@ -111,6 +112,95 @@ pub fn load_mesh(path: impl AsRef<Path>) -> Result<MeshData, MeshError> {
     mesh.recalculate_missing_normals();
     mesh.validate()?;
     Ok(mesh)
+}
+
+/// Imports FBX through Assimp, baking node transforms for the static viewport mesh.
+fn load_fbx(path: &Path) -> Result<MeshData, MeshError> {
+    use russimp_ng::scene::{PostProcess, Scene};
+
+    let path_str = path.to_str().ok_or_else(|| {
+        MeshError::InvalidMesh("FBX path is not valid UTF-8".to_owned())
+    })?;
+    let scene = Scene::from_file(
+        path_str,
+        vec![
+            PostProcess::Triangulate,
+            PostProcess::GenerateSmoothNormals,
+            PostProcess::PreTransformVertices,
+            PostProcess::SortByPrimitiveType,
+            PostProcess::ValidateDataStructure,
+        ],
+    )
+    .map_err(|error| MeshError::InvalidMesh(format!("FBX import failed: {error}")))?;
+
+    let mut vertices = Vec::<MeshVertex>::new();
+    let mut indices = Vec::<u32>::new();
+    let fallback_name = path.file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("FBX mesh")
+        .to_owned();
+    let mut mesh_name = fallback_name.clone();
+
+    for source in &scene.meshes {
+        if source.vertices.is_empty() {
+            continue;
+        }
+        if vertices.len().saturating_add(source.vertices.len()) > MAX_MESH_VERTICES {
+            return Err(MeshError::InvalidMesh(format!(
+                "FBX exceeds the vertex limit of {MAX_MESH_VERTICES}"
+            )));
+        }
+        let vertex_base = u32::try_from(vertices.len()).map_err(|_| {
+            MeshError::InvalidMesh("FBX vertex index overflow".to_owned())
+        })?;
+        if mesh_name == fallback_name && !source.name.trim().is_empty() {
+            mesh_name = source.name.clone();
+        }
+
+        let uv_channel = source.texture_coords.first().and_then(Option::as_ref);
+        for (index, position) in source.vertices.iter().enumerate() {
+            let normal = source.normals.get(index)
+                .map(|normal| [normal.x, normal.y, normal.z])
+                .unwrap_or([0.0; 3]);
+            let uv = uv_channel.and_then(|channel| channel.get(index))
+                .map(|uv| [uv.x, uv.y, 1.0])
+                .unwrap_or([0.0; 3]);
+            vertices.push(MeshVertex {
+                position: [position.x, position.y, position.z],
+                normal,
+                skin_position: [0.0; 3],
+                region_position: [0.0; 3],
+                uv_data: uv,
+            });
+        }
+
+        for face in &source.faces {
+            if face.0.len() < 3 {
+                continue;
+            }
+            for corner in 1..face.0.len() - 1 {
+                let triangle = [face.0[0], face.0[corner], face.0[corner + 1]];
+                if triangle.iter().any(|&index| index as usize >= source.vertices.len()) {
+                    return Err(MeshError::InvalidMesh(
+                        "FBX contains an out-of-range face index".to_owned()
+                    ));
+                }
+                indices.extend(triangle.map(|index| vertex_base + index));
+                if indices.len() > MAX_MESH_INDICES {
+                    return Err(MeshError::InvalidMesh(format!(
+                        "FBX exceeds the index limit of {MAX_MESH_INDICES}"
+                    )));
+                }
+            }
+        }
+    }
+
+    if vertices.is_empty() || indices.is_empty() {
+        return Err(MeshError::InvalidMesh(
+            "FBX contains no usable triangle mesh".to_owned()
+        ));
+    }
+    Ok(MeshData { name: mesh_name, vertices, indices })
 }
 
 impl MeshData {

@@ -2,7 +2,7 @@
 
 ## Princípio
 
-O projeto não chama `bpy`, não abre o Blender e não usa Cycles/Eevee. `wgpu` é a abstração de baixo nível da GPU; os shaders próprios do projeto compõem a visualização do material. O viewport atual rasteriza uma malha triangular no alvo offscreen com teste de profundidade e depois compõe esse alvo na interface. Uma esfera triangulada serve como modelo padrão; OBJ e glTF/GLB podem ser importados pelo seletor de arquivos.
+O projeto não chama `bpy`, não abre o Blender e não usa Cycles/Eevee. `wgpu` é a abstração de baixo nível da GPU; os shaders próprios do projeto compõem a visualização do material. O viewport atual rasteriza uma malha triangular no alvo offscreen com teste de profundidade e depois compõe esse alvo na interface. Uma esfera triangulada serve como modelo padrão; OBJ, glTF/GLB e FBX podem ser importados pelo seletor. O FBX é lido pelo Assimp (`russimp-ng` com pré-compilados), que triangula faces e aplica transformações de nós à geometria estática para visualização.
 
 ## Camadas previstas
 
@@ -13,14 +13,14 @@ skin-studio-rs/
 ├── src/render/*.wgsl         # shader de pele, grade e composição do viewport
 ├── src/skin_detail.rs        # geração CPU de mapa de altura tileável de poros
 ├── src/material.rs           # parâmetros tipados e presets versionados
-├── src/geometry.rs           # importação OBJ/glTF/GLB e atributos da malha
+├── src/geometry.rs           # importação OBJ/glTF/GLB/FBX e atributos da malha
 └── .github/workflows/        # testes, validação WGSL e build multiplataforma
 ```
 
 ## Renderizador: etapas
 
 1. **Viewport rasterizado** (implementado): malhas triangulares, alvo de profundidade, câmera orbital, grade, shader de pele aproximado e normalização de modelos importados.
-2. **Malhas reais** (base implementada): importação de glTF/GLB e OBJ, buffers de vértices/índices, normais, câmera orbital e depth buffer. Tangentes, seleção de múltiplos objetos e materiais por primitiva continuam pendentes.
+2. **Malhas reais** (base implementada): importação de glTF/GLB, OBJ e FBX, buffers de vértices/índices, normais, câmera orbital e depth buffer. Tangentes, seleção de múltiplos objetos e materiais por primitiva continuam pendentes.
 3. **Material PBR**: fluxo de Base Color/Roughness/Normal, gestão explícita de espaço de cor, fontes de luz e tone mapping.
 4. **Pele**: migração por subsistemas do `__init__.py`, preservando valores, frequência física, seeds e significado dos controles. A primeira parte do sistema de poros foi portada: mapa de altura tileável, três populações Voronoi, deformação de domínio, variação de tamanho, relevo, escurecimento de abertura, oclusão especular e controles regionais aproximados. A Reference Height no estilo SKIN e a Skin Line Network são camadas independentes. O renderer também possui Crosshatch direcional e micro-rugas com parâmetros separados, além de atlas anatômicos UV importáveis em dois PNGs RGBA; estilo LEATHER, máscaras pintadas diretamente no app, pigmentos adicionais, vasos, lábios e SSS seguem em etapas separadas.
 5. **Baker independente**: UVs, padding/margem, Base Color, Normal tangencial e Roughness. Alpha poderá ser incluído quando o formato de geometria/material e o caso de uso forem definidos.

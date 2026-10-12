@@ -150,7 +150,7 @@ impl SkinStudioApp {
 
     fn import_mesh(&mut self) {
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("3D meshes", &["obj", "gltf", "glb"])
+            .add_filter("3D meshes", &["obj", "gltf", "glb", "fbx"])
             .pick_file()
         else {
             return;
@@ -226,7 +226,7 @@ impl SkinStudioApp {
             StudioTab::Setup => {
                 ui.label(egui::RichText::new("Scene and model").strong());
                 ui.separator();
-                if ui.button("Import OBJ / glTF / GLB").clicked() {
+                if ui.button("Import OBJ / glTF / GLB / FBX").clicked() {
                     self.import_mesh();
                 }
                 ui.add_space(8.0);

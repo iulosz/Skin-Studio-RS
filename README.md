@@ -7,7 +7,7 @@ Aplicativo desktop independente em Rust, criado para reconstruir gradualmente os
 - Interface desktop em Rust com navegação Setup, Color, Detail, Reference, Surface, Hair e Bake.
 - Pré-visualização de material usando shader WGSL próprio executado por `wgpu`.
 - Viewport rasterizado de malhas triangulares com teste de profundidade e grade real.
-- Importação de malhas OBJ, glTF e GLB, com centralização e escala automáticas.
+- Importação de malhas OBJ, glTF, GLB e FBX, com centralização e escala automáticas; FBX usa Assimp via `russimp-ng`, preservando UVs e normais quando disponíveis.
 - Câmera orbital com zoom, pan e restauração de enquadramento.
 - Esfera de demonstração como malha padrão para ajustar o material antes da importação de um modelo.
 - Controles de poros portados do Skin Studio 2.4.76: intensidade, escala, irregularidade, variação de tamanho, mapa de altura tileável, seed e relevo.
@@ -36,6 +36,7 @@ Os parâmetros são salvos em presets JSON versão 9. Presets versões 1 a 8 sã
 
 - Rust stable (a versão atual do `eframe` requer Rust 1.95 ou superior).
 - `egui` / `eframe` para a interface.
+- Assimp (`russimp-ng` com bibliotecas pré-compiladas) para importar FBX.
 - `wgpu` e WGSL para o renderizador GPU próprio do aplicativo.
 - `bytemuck` para empacotar uniformes enviados ao shader.
 

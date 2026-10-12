@@ -23,6 +23,7 @@
 
 ## M2 — Malhas e viewport 3D
 - [x] Importar malhas triangulares OBJ e glTF/GLB.
+- [x] Importar FBX via Assimp, triangulando faces e preservando UVs/normais quando disponíveis; aplicar transformações da hierarquia à geometria estática para preview.
 - [x] Criar buffers de vértices/índices e normalizar escala/centro para a pré-visualização.
 - [x] Câmera orbital, zoom, pan por Shift+arraste e restauração de enquadramento.
 - [x] Grade 3D desenhada na GPU e depth buffer para superfícies.
