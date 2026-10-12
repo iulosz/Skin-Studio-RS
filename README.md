@@ -18,13 +18,19 @@ Aplicativo desktop independente em Rust, criado para reconstruir gradualmente os
 - UV `vt` do OBJ e `TEXCOORD_0` do glTF são preservados para a camada UV-based Albedo Realism, com broad/medium/micro variation, hemoglobina, tom periorbital e microvariação de melanina.
 - GitHub Actions com verificação de formato, testes e builds de release para Windows, Linux e macOS.
 
-**Ainda não é a conversão completa do addon.** O primeiro subsistema de poros está portado, mas as máscaras anatômicas ainda são heurísticas baseadas no bounding box e assumem uma cabeça voltada para -Y. Coord Scale agora inclui M/CM/MM/custom; Skin Line Network, crosshatch, estilo LEATHER do mapa de referência, pigmentação anatômica, vascularização, lábios, SSS, cabelo e bake continuam no roadmap. A compilação não substitui comparação visual com o Blender.
+**Ainda não é a conversão completa do addon.** Crosshatch/micro-rugas e atlas de máscaras anatômicas já estão na implementação, mas precisam de comparação visual com o Blender. Máscaras importadas dependem de UVs; sem elas o sistema usa heurísticas aproximadas. Coord Scale inclui M/CM/MM/custom; estilo LEATHER do mapa de referência, pigmentos regionais adicionais, vascularização, lábios, SSS, cabelo e bake continuam no roadmap. A compilação não substitui comparação visual com o Blender.
+
+## Detail: crosshatch, micro-rugas e máscaras anatômicas
+
+O painel Detail possui controles separados para crosshatch direcional e microrrugas (intensidade, escala, orientação, breakup, relevo e roughness). As duas camadas usam projeção triplanar, independentemente da UV, e permanecem separadas da Skin Line Network celular.
+
+Para malhas com UV, importe dois atlas PNG RGBA de mesma resolução. Atlas A: R = nariz, G = bochechas, B = testa, A = queixo. Atlas B: R = orelhas, G = área dos olhos, B = pescoço, A = cobertura da pele/ilha UV. Branco indica região presente e preto indica ausência; mantenha áreas fora das ilhas UV transparentes. Os atlas precisam corresponder ao layout UV da malha. A influência dos atlas importados é controlável e o sistema retorna às heurísticas quando não há atlas/UV. Pintura direta dentro do aplicativo ainda não está disponível.
 
 ## Editor de pele — primeira etapa
 
 O painel de propriedades expõe controles para Base Color, tonalidade aproximada de hemoglobina, variação de pigmentação, poros, micro-relevo, sardas, rugosidade, especular, oleosidade e subsurface. Os ajustes são enviados em tempo real ao shader WGSL da pré-visualização.
 
-Os parâmetros são salvos em presets JSON versão 8. Presets versões 1 a 7 são migrados automaticamente, preservando os valores antigos e preenchendo os controles novos com padrões derivados do `__init__.py` original. Hemoglobina e sardas são efeitos procedurais de look development; ainda não representam máscaras anatômicas ou texturas calibradas.
+Os parâmetros são salvos em presets JSON versão 9. Presets versões 1 a 8 são migrados automaticamente, preservando os valores antigos e preenchendo os novos controles com valores padrão derivados do `__init__.py` original. Hemoglobina e sardas são efeitos procedurais de look development; ainda não representam máscaras anatômicas ou texturas calibradas.
 
 ## Tecnologias
 

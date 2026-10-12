@@ -45,9 +45,9 @@
 - [x] Portar Skin Line Network com platôs, sulcos celulares em duas escalas, vincos e ajuste físico de relevo.
 - [x] Portar build_color_layer(): variação macro, melanina, eritema, ouro, microcor, vermelhidão e Mottled em três escalas.
 - [x] Portar broad/medium/micro Albedo Realism e canais hemoglobina/periorbital/melanina; preservar UVs OBJ/glTF.
-- [ ] Substituir máscaras regionais heurísticas por máscaras anatômicas importadas ou pintáveis.
-- [ ] Portar crosshatch direcional e micro-rugas com escala, orientação, breakup e contribuição para roughness.
-- [ ] Skin Line Network, crosshatch e micro-rugas; portar parâmetros e algoritmo sem simplificação silenciosa.
+- [x] Importar dois atlas anatômicos RGBA por UV (nariz/bochechas/testa/queixo + orelhas/olhos/pescoço/cobertura), com mistura controlável e fallback heurístico; pintura direta no app permanece pendente.
+- [x] Portar Crosshatch direcional triplanar com orientação, escala, domain warp, breakup, relevo e contribuição à roughness.
+- [x] Portar micro-rugas anisotrópicas com orientação/escala, continuidade variável, relevo e contribuição à roughness; ainda requer comparação visual com o addon Blender.
 - [ ] Lábios, olheiras, vascularização, sardas e microvariação.
 - [ ] Roughness, specular/coat e subsurface com limites calibrados.
 - [ ] Comparação lado a lado com Blender usando cabeça, escala, iluminação e câmera controladas, principalmente para Reference Height e tamanho físico das células.
