@@ -170,7 +170,7 @@ impl Default for SkinMaterial {
             coord_custom_meters_per_unit: 1.0,
             reference_strength: 0.0,
             reference_relief: 1.0,
-            reference_cell_mm: 1.16,
+            reference_cell_mm: crate::reference_height::DEFAULT_REFERENCE_CELL_MM,
             reference_pores: 1.0,
             reference_seed: 11,
             reference_resolution: 1024,
@@ -224,6 +224,50 @@ impl Default for SkinMaterial {
 }
 
 impl SkinMaterial {
+    /// Defaults used to fill controls that did not exist in older preset schemas.
+    /// Keep these independent from the tuned defaults for a newly created material.
+    fn legacy_defaults() -> Self {
+        Self {
+            base_color: [0.4948, 0.2102, 0.1229],
+            pore_strength: 1.0,
+            roughness: 0.46,
+            specular: 0.50,
+            subsurface: 0.095,
+            micro_relief: 0.35,
+            oiliness: 0.12,
+            pore_micro_detail: 0.38,
+            pore_micro_scale: 145.0,
+            pore_irregularity: 0.70,
+            pore_size_variation: 0.65,
+            pore_map_density: 35.0,
+            pore_map_relief: 4.0,
+            fine_detail_strength: 0.02,
+            fine_detail_scale: 180.0,
+            micro_grain_strength: 0.02,
+            micro_grain_scale: 320.0,
+            micro_grain_roughness: 0.035,
+            spec_pore_occlusion: 0.55,
+            skin_line_strength: 0.6,
+            skin_line_scale: 80.0,
+            skin_line_thickness: 0.35,
+            skin_line_relief: 1.0,
+            skin_line_shading: 0.18,
+            crosshatch_strength: 0.22,
+            crosshatch_relief: 0.75,
+            crosshatch_roughness: 0.025,
+            wrinkle_strength: 0.16,
+            wrinkle_relief: 0.8,
+            wrinkle_roughness: 0.035,
+            mottled_strength: 0.62,
+            micro_color_strength: 0.055,
+            albedo_realism_strength: 0.72,
+            albedo_hemoglobin_strength: 0.32,
+            albedo_melanin_strength: 0.26,
+            albedo_micro_variation_strength: 0.18,
+            ..Self::default()
+        }
+    }
+
     /// Rejects invalid values instead of silently changing a saved material.
     pub fn validate(&self) -> Result<(), PresetError> {
         for (index, value) in self.base_color.iter().enumerate() {
@@ -379,7 +423,7 @@ impl From<SkinMaterialV1> for SkinMaterial {
             specular: old.specular,
             subsurface: old.subsurface,
             micro_relief: old.micro_relief,
-            ..Self::default()
+            ..Self::legacy_defaults()
         }
     }
 }
@@ -421,7 +465,7 @@ impl From<SkinMaterialV2> for SkinMaterial {
             freckle_strength: old.freckle_strength,
             oiliness: old.oiliness,
             pigment_variation: old.pigment_variation,
-            ..Self::default()
+            ..Self::legacy_defaults()
         }
     }
 }
@@ -486,8 +530,7 @@ impl SkinPreset {
             3 => {
                 // Schema 3 introduced the pore subsystem. Schema 4 adds physical
                 // coordinate units, so old schema-3 presets inherit meter units.
-                let old: SkinPreset =
-                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                let old = deserialize_legacy_preset(source)?;
                 Self {
                     schema_version: PRESET_SCHEMA_VERSION,
                     name: old.name,
@@ -497,8 +540,7 @@ impl SkinPreset {
             4 => {
                 // Schema 4 added physical coordinate units. Schema 5 adds the
                 // reference-height generator and inherits its source-compatible defaults.
-                let old: SkinPreset =
-                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                let old = deserialize_legacy_preset(source)?;
                 Self {
                     schema_version: PRESET_SCHEMA_VERSION,
                     name: old.name,
@@ -508,8 +550,7 @@ impl SkinPreset {
             5 => {
                 // Schema 5 added the source Reference Height controls. Skin Line
                 // Network controls inherit the original add-on defaults in schema 6.
-                let old: SkinPreset =
-                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                let old = deserialize_legacy_preset(source)?;
                 Self {
                     schema_version: PRESET_SCHEMA_VERSION,
                     name: old.name,
@@ -519,8 +560,7 @@ impl SkinPreset {
             6 => {
                 // Schema 6 introduced Skin Line Network. Multi-scale color controls
                 // inherit the original add-on defaults in schema 7.
-                let old: SkinPreset =
-                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                let old = deserialize_legacy_preset(source)?;
                 Self {
                     schema_version: PRESET_SCHEMA_VERSION,
                     name: old.name,
@@ -530,8 +570,7 @@ impl SkinPreset {
             7 => {
                 // Schema 7 introduced the multi-scale color layer. Albedo Realism controls
                 // inherit the original add-on defaults in schema 8.
-                let old: SkinPreset =
-                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                let old = deserialize_legacy_preset(source)?;
                 Self {
                     schema_version: PRESET_SCHEMA_VERSION,
                     name: old.name,
@@ -541,8 +580,7 @@ impl SkinPreset {
             8 => {
                 // Schema 8 introduced UV Albedo Realism. Directional detail and
                 // imported anatomical masks inherit defaults in schema 9.
-                let old: SkinPreset =
-                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                let old = deserialize_legacy_preset(source)?;
                 Self {
                     schema_version: PRESET_SCHEMA_VERSION,
                     name: old.name,
@@ -555,6 +593,28 @@ impl SkinPreset {
         preset.validate()?;
         Ok(preset)
     }
+}
+
+/// Reads a historical preset while supplying historical values for fields absent from
+/// that schema. Explicit values present in the user's file always take precedence.
+fn deserialize_legacy_preset(source: &str) -> Result<SkinPreset, PresetError> {
+    let mut value: serde_json::Value =
+        serde_json::from_str(source).map_err(PresetError::Json)?;
+    let defaults =
+        serde_json::to_value(SkinMaterial::legacy_defaults()).map_err(PresetError::Json)?;
+
+    if let (Some(material), Some(defaults)) = (
+        value.get_mut("material").and_then(serde_json::Value::as_object_mut),
+        defaults.as_object(),
+    ) {
+        for (key, default_value) in defaults {
+            material
+                .entry(key.clone())
+                .or_insert_with(|| default_value.clone());
+        }
+    }
+
+    serde_json::from_value(value).map_err(PresetError::Json)
 }
 
 pub fn save_preset(path: impl AsRef<Path>, preset: &SkinPreset) -> Result<(), PresetError> {
