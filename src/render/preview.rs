@@ -15,6 +15,7 @@ use half::f16;
 use wgpu::util::DeviceExt;
 
 use crate::{
+    anatomical_masks::AnatomicalMaskAtlas,
     geometry::{MeshData, MeshVertex},
     material::SkinMaterial,
     reference_height::{ReferenceHeightError, ReferenceHeightMap, ReferenceHeightSettings},
@@ -47,6 +48,11 @@ struct ViewportUniforms {
     reference_aux: [f32; 4],
     skin_line_controls: [f32; 4],
     skin_line_aux: [f32; 4],
+    crosshatch_controls: [f32; 4],
+    crosshatch_aux: [f32; 4],
+    wrinkle_controls: [f32; 4],
+    wrinkle_aux: [f32; 4],
+    anatomy_controls: [f32; 4],
     color_controls: [f32; 4],
     color_scales: [f32; 4],
     chromatic_controls: [f32; 4],
@@ -72,6 +78,32 @@ struct GpuReferenceMap {
     _texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
     revision: u64,
+}
+struct GpuAnatomicalMasks {
+    _texture_a: wgpu::Texture,
+    _texture_b: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
+    revision: u64,
+}
+fn upload_anatomical_mask_texture(
+    device: &wgpu::Device, queue: &wgpu::Queue, label: &'static str, atlas: &AnatomicalMaskAtlas,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d { width: atlas.width, height: atlas.height, depth_or_array_layers: 1 },
+        mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        &atlas.pixels,
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(atlas.width * 4), rows_per_image: Some(atlas.height) },
+        wgpu::Extent3d { width: atlas.width, height: atlas.height, depth_or_array_layers: 1 },
+    );
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
 }
 
 struct ViewportTarget {
@@ -160,6 +192,9 @@ struct SkinRenderResources {
     reference_bind_group_layout: wgpu::BindGroupLayout,
     reference_sampler: wgpu::Sampler,
     reference_map: Option<GpuReferenceMap>,
+    anatomy_mask_bind_group_layout: wgpu::BindGroupLayout,
+    anatomy_mask_sampler: wgpu::Sampler,
+    anatomy_masks: Option<GpuAnatomicalMasks>,
     display_bind_group_layout: wgpu::BindGroupLayout,
     display_sampler: wgpu::Sampler,
     grid_buffer: wgpu::Buffer,
@@ -273,6 +308,25 @@ impl SkinRenderResources {
             ..Default::default()
         });
 
+        let anatomy_mask_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Skin Studio anatomical mask atlas layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+            ],
+        });
+        let anatomy_mask_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Skin Studio anatomical mask sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
         let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Skin Studio PBR-like mesh preview shader"),
             source: wgpu::ShaderSource::Wgsl(MESH_SHADER.into()),
@@ -283,6 +337,7 @@ impl SkinRenderResources {
                 Some(&uniform_layout),
                 Some(&pore_bind_group_layout),
                 Some(&reference_bind_group_layout),
+                Some(&anatomy_mask_bind_group_layout),
             ],
             immediate_size: 0,
         });
@@ -440,6 +495,9 @@ impl SkinRenderResources {
             reference_bind_group_layout,
             reference_sampler,
             reference_map: None,
+            anatomy_mask_bind_group_layout,
+            anatomy_mask_sampler,
+            anatomy_masks: None,
             display_bind_group_layout: display_layout,
             display_sampler,
             grid_buffer,
@@ -554,6 +612,10 @@ pub struct SkinPreview {
     reference_map: Arc<ReferenceHeightMap>,
     reference_map_revision: u64,
     pending_reference_map: Option<Receiver<Result<ReferenceHeightMap, ReferenceHeightError>>>,
+    anatomical_mask_a: Arc<AnatomicalMaskAtlas>,
+    anatomical_mask_b: Arc<AnatomicalMaskAtlas>,
+    anatomical_mask_revision: u64,
+    anatomical_masks_loaded: bool,
     camera: OrbitCamera,
 }
 
@@ -575,6 +637,10 @@ impl SkinPreview {
                 reference_map,
                 reference_map_revision: 1,
                 pending_reference_map: None,
+                anatomical_mask_a: Arc::new(AnatomicalMaskAtlas::blank()),
+                anatomical_mask_b: Arc::new(AnatomicalMaskAtlas::blank()),
+                anatomical_mask_revision: 0,
+                anatomical_masks_loaded: false,
                 camera: OrbitCamera::default(),
             };
         };
@@ -593,6 +659,10 @@ impl SkinPreview {
             reference_map,
             reference_map_revision: 1,
             pending_reference_map: None,
+            anatomical_mask_a: Arc::new(AnatomicalMaskAtlas::blank()),
+            anatomical_mask_b: Arc::new(AnatomicalMaskAtlas::blank()),
+            anatomical_mask_revision: 0,
+            anatomical_masks_loaded: false,
             camera: OrbitCamera::default(),
         }
     }
@@ -602,6 +672,26 @@ impl SkinPreview {
         self.mesh_revision = self.mesh_revision.wrapping_add(1);
         self.camera.reset();
     }
+
+    pub fn set_anatomical_masks(&mut self, atlas_a: AnatomicalMaskAtlas, atlas_b: AnatomicalMaskAtlas) -> Result<(), String> {
+        atlas_a.validate()?;
+        atlas_b.validate()?;
+        if atlas_a.width != atlas_b.width || atlas_a.height != atlas_b.height {
+            return Err("Os dois atlas anatômicos precisam ter a mesma resolução".to_owned());
+        }
+        self.anatomical_mask_a = Arc::new(atlas_a);
+        self.anatomical_mask_b = Arc::new(atlas_b);
+        self.anatomical_mask_revision = self.anatomical_mask_revision.wrapping_add(1);
+        self.anatomical_masks_loaded = true;
+        Ok(())
+    }
+    pub fn clear_anatomical_masks(&mut self) {
+        self.anatomical_mask_a = Arc::new(AnatomicalMaskAtlas::blank());
+        self.anatomical_mask_b = Arc::new(AnatomicalMaskAtlas::blank());
+        self.anatomical_mask_revision = self.anatomical_mask_revision.wrapping_add(1);
+        self.anatomical_masks_loaded = false;
+    }
+    pub fn has_anatomical_masks(&self) -> bool { self.anatomical_masks_loaded }
 
     pub fn mesh_name(&self) -> &str {
         &self.mesh.name
@@ -801,6 +891,11 @@ impl SkinPreview {
                 params.mottled_variation,
                 params.mottled_contrast,
             ],
+            crosshatch_controls: [params.crosshatch_strength, params.crosshatch_scale, params.crosshatch_angle, params.crosshatch_breakup],
+            crosshatch_aux: [params.crosshatch_relief, params.crosshatch_roughness, 0.0, 0.0],
+            wrinkle_controls: [params.wrinkle_strength, params.wrinkle_scale, params.wrinkle_angle, params.wrinkle_breakup],
+            wrinkle_aux: [params.wrinkle_relief, params.wrinkle_roughness, params.wrinkle_length, 0.0],
+            anatomy_controls: [params.anatomical_mask_strength, if self.anatomical_masks_loaded { 1.0 } else { 0.0 }, 0.0, 0.0],
             albedo_controls: [
                 params.albedo_realism_strength,
                 params.albedo_hemoglobin_strength,
@@ -821,6 +916,9 @@ impl SkinPreview {
                 pore_map_revision: self.pore_map_revision,
                 reference_map: Arc::clone(&self.reference_map),
                 reference_map_revision: self.reference_map_revision,
+                anatomical_mask_a: Arc::clone(&self.anatomical_mask_a),
+                anatomical_mask_b: Arc::clone(&self.anatomical_mask_b),
+                anatomical_mask_revision: self.anatomical_mask_revision,
                 show_grid,
             },
         ));
@@ -837,6 +935,9 @@ struct MeshPreviewCallback {
     pore_map_revision: u64,
     reference_map: Arc<ReferenceHeightMap>,
     reference_map_revision: u64,
+    anatomical_mask_a: Arc<AnatomicalMaskAtlas>,
+    anatomical_mask_b: Arc<AnatomicalMaskAtlas>,
+    anatomical_mask_revision: u64,
     show_grid: bool,
 }
 
@@ -1001,6 +1102,27 @@ impl eframe::egui_wgpu::CallbackTrait for MeshPreviewCallback {
             });
         }
 
+        let needs_anatomical_masks = resources.anatomy_masks.as_ref()
+            .is_none_or(|maps| maps.revision != self.anatomical_mask_revision);
+        if needs_anatomical_masks {
+            let (texture_a, view_a) = upload_anatomical_mask_texture(device, queue, "Skin Studio anatomical mask atlas A", &self.anatomical_mask_a);
+            let (texture_b, view_b) = upload_anatomical_mask_texture(device, queue, "Skin Studio anatomical mask atlas B", &self.anatomical_mask_b);
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Skin Studio anatomical masks binding"),
+                layout: &resources.anatomy_mask_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view_a) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&resources.anatomy_mask_sampler) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&view_b) },
+                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&resources.anatomy_mask_sampler) },
+                ],
+            });
+            resources.anatomy_masks = Some(GpuAnatomicalMasks {
+                _texture_a: texture_a, _texture_b: texture_b, bind_group,
+                revision: self.anatomical_mask_revision,
+            });
+        }
+
         let needs_mesh = resources
             .mesh
             .as_ref()
@@ -1084,6 +1206,8 @@ impl eframe::egui_wgpu::CallbackTrait for MeshPreviewCallback {
             .as_ref()
             .expect("reference-height texture should be uploaded before the mesh pass");
         render_pass.set_bind_group(2, &reference_map.bind_group, &[]);
+        let anatomy_masks = resources.anatomy_masks.as_ref().expect("anatomical masks should be uploaded before mesh pass");
+        render_pass.set_bind_group(3, &anatomy_masks.bind_group, &[]);
         render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
         render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
         render_pass.draw_indexed(0..mesh.index_count, 0, 0..1);

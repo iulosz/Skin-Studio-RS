@@ -15,6 +15,11 @@ struct ViewportUniforms {
     reference_aux: vec4<f32>,
     skin_line_controls: vec4<f32>,
     skin_line_aux: vec4<f32>,
+    crosshatch_controls: vec4<f32>,
+    crosshatch_aux: vec4<f32>,
+    wrinkle_controls: vec4<f32>,
+    wrinkle_aux: vec4<f32>,
+    anatomy_controls: vec4<f32>,
     color_controls: vec4<f32>,
     color_scales: vec4<f32>,
     chromatic_controls: vec4<f32>,
@@ -37,6 +42,15 @@ var pore_height_sampler: sampler;
 var reference_height_texture: texture_2d<f32>;
 @group(2) @binding(1)
 var reference_height_sampler: sampler;
+
+@group(3) @binding(0)
+var anatomy_mask_atlas_a: texture_2d<f32>;
+@group(3) @binding(1)
+var anatomy_mask_sampler_a: sampler;
+@group(3) @binding(2)
+var anatomy_mask_atlas_b: texture_2d<f32>;
+@group(3) @binding(3)
+var anatomy_mask_sampler_b: sampler;
 
 struct VertexInput {
     @location(0) position: vec3<f32>,
@@ -239,6 +253,51 @@ fn gaussian(value: f32, center: f32, radius: f32) -> f32 {
     return exp(-(d * d) * 2.2);
 }
 
+
+fn crosshatch_plane(p: vec2<f32>, scale: f32, angle: f32, breakup: f32) -> f32 {
+    let c = cos(angle);
+    let s = sin(angle);
+    let rotated = vec2<f32>(p.x * c - p.y * s, p.x * s + p.y * c);
+    let warp = (vec2<f32>(
+        value_noise3(vec3<f32>(rotated * vec2<f32>(4.0, 9.0), 13.0)),
+        value_noise3(vec3<f32>(rotated * vec2<f32>(7.0, 3.0), 29.0))
+    ) - vec2<f32>(0.5)) * (0.026 * breakup);
+    let q = (rotated + warp) * scale;
+    let line_x = 1.0 - smoothstep(0.045, 0.155, abs(fract(q.x) - 0.5));
+    let line_y = 1.0 - smoothstep(0.045, 0.155, abs(fract(q.y) - 0.5));
+    let noise_gate = smoothstep(0.18, 0.82, value_noise3(vec3<f32>(rotated * vec2<f32>(5.0, 15.0), 41.0)));
+    return clamp(max(line_x, line_y * 0.86) * mix(0.48, 1.0, mix(1.0, noise_gate, breakup)), 0.0, 1.0);
+}
+fn wrinkle_plane(p: vec2<f32>, scale: f32, angle: f32, breakup: f32, length_factor: f32) -> f32 {
+    let c = cos(angle);
+    let s = sin(angle);
+    let rotated = vec2<f32>(p.x * c - p.y * s, p.x * s + p.y * c);
+    let warp = (value_noise3(vec3<f32>(rotated * 10.0, 53.0)) - 0.5) * 0.035 * breakup;
+    let along = rotated.x * scale * max(length_factor, 0.05);
+    let across = (rotated.y + warp) * scale;
+    let stripe = 1.0 - smoothstep(0.025, 0.115, abs(fract(across) - 0.5));
+    let continuity = smoothstep(0.20, 0.74, value_noise3(vec3<f32>(along * 4.0, across * 0.13, 67.0)));
+    return clamp(stripe * mix(1.0, continuity, breakup), 0.0, 1.0);
+}
+fn crosshatch_height_triplanar(p: vec3<f32>, normal: vec3<f32>, scale: f32, angle: f32, breakup: f32) -> f32 {
+    let n = abs(normal);
+    let squared = n * n;
+    let weights = squared * squared;
+    let total = max(weights.x + weights.y + weights.z, 0.0001);
+    return (crosshatch_plane(p.yz, scale, angle, breakup) * weights.x
+        + crosshatch_plane(p.xz, scale, angle, breakup) * weights.y
+        + crosshatch_plane(p.xy, scale, angle, breakup) * weights.z) / total;
+}
+fn wrinkle_height_triplanar(p: vec3<f32>, normal: vec3<f32>, scale: f32, angle: f32, breakup: f32, length_factor: f32) -> f32 {
+    let n = abs(normal);
+    let squared = n * n;
+    let weights = squared * squared;
+    let total = max(weights.x + weights.y + weights.z, 0.0001);
+    return (wrinkle_plane(p.yz, scale, angle, breakup, length_factor) * weights.x
+        + wrinkle_plane(p.xz, scale, angle, breakup, length_factor) * weights.y
+        + wrinkle_plane(p.xy, scale, angle, breakup, length_factor) * weights.z) / total;
+}
+
 struct RegionDetail {
     large_pores: f32,
     primary_pores: f32,
@@ -251,21 +310,32 @@ struct RegionDetail {
 // Port of _region_weight() / REGIONAL_RELIEF_TABLE from __init__.py. Imported
 // OBJ/glTF files do not carry Blender vertex-group weights reliably, so this
 // uses bbox-normalized head heuristics. The artist can adjust the weights in UI.
-fn region_detail(c: vec3<f32>) -> RegionDetail {
+fn region_detail(c: vec3<f32>, uv_data: vec3<f32>) -> RegionDetail {
     let x = c.x;
     let z = c.z;
     let front = 1.0 - c.y;
-    let nose = gaussian(x, 0.5, 0.12) * gaussian(z, 0.50, 0.13) * gaussian(front, 0.90, 0.22);
-    let cheeks = max(gaussian(x, 0.27, 0.18), gaussian(x, 0.73, 0.18))
-        * gaussian(z, 0.58, 0.17) * gaussian(front, 0.80, 0.28);
-    let ears = max(gaussian(x, 0.03, 0.12), gaussian(x, 0.97, 0.12))
-        * gaussian(z, 0.66, 0.20) * gaussian(front, 0.45, 0.45);
-    let forehead = gaussian(x, 0.5, 0.42) * gaussian(z, 0.80, 0.16) * gaussian(front, 0.75, 0.32);
-    let chin = gaussian(x, 0.5, 0.28) * gaussian(z, 0.25, 0.13) * gaussian(front, 0.75, 0.35);
-    let eyes = max(gaussian(x, 0.34, 0.13), gaussian(x, 0.66, 0.13))
-        * gaussian(z, 0.66, 0.11) * gaussian(front, 0.82, 0.24);
-    let neck = gaussian(x, 0.5, 0.44) * clamp((0.34 - z) / 0.20, 0.0, 1.0);
-
+    let atlas_a = textureSample(anatomy_mask_atlas_a, anatomy_mask_sampler_a, uv_data.xy);
+    let atlas_b = textureSample(anatomy_mask_atlas_b, anatomy_mask_sampler_b, uv_data.xy);
+    let nose_heuristic = gaussian(x, 0.5, 0.12) * gaussian(z, 0.50, 0.13) * gaussian(front, 0.90, 0.22);
+    let cheeks_heuristic = max(gaussian(x, 0.27, 0.18), gaussian(x, 0.73, 0.18)) * gaussian(z, 0.58, 0.17) * gaussian(front, 0.80, 0.28);
+    let ears_heuristic = max(gaussian(x, 0.03, 0.12), gaussian(x, 0.97, 0.12)) * gaussian(z, 0.66, 0.20) * gaussian(front, 0.45, 0.45);
+    let forehead_heuristic = gaussian(x, 0.5, 0.42) * gaussian(z, 0.80, 0.16) * gaussian(front, 0.75, 0.32);
+    let chin_heuristic = gaussian(x, 0.5, 0.28) * gaussian(z, 0.25, 0.13) * gaussian(front, 0.75, 0.35);
+    let eyes_heuristic = max(gaussian(x, 0.34, 0.13), gaussian(x, 0.66, 0.13)) * gaussian(z, 0.66, 0.11) * gaussian(front, 0.82, 0.24);
+    let neck_heuristic = gaussian(x, 0.5, 0.44) * clamp((0.34 - z) / 0.20, 0.0, 1.0);
+    // Atlas A: R nose, G cheeks, B forehead, A chin.
+    // Atlas B: R ears, G eye area, B neck, A coverage for the painted UV islands.
+    let imported_mix = clamp(u.anatomy_controls.x, 0.0, 1.0)
+        * clamp(u.anatomy_controls.y, 0.0, 1.0)
+        * clamp(uv_data.z, 0.0, 1.0)
+        * clamp(atlas_b.a, 0.0, 1.0);
+    let nose = mix(nose_heuristic, atlas_a.r, imported_mix);
+    let cheeks = mix(cheeks_heuristic, atlas_a.g, imported_mix);
+    let forehead = mix(forehead_heuristic, atlas_a.b, imported_mix);
+    let chin = mix(chin_heuristic, atlas_a.a, imported_mix);
+    let ears = mix(ears_heuristic, atlas_b.r, imported_mix);
+    let eyes = mix(eyes_heuristic, atlas_b.g, imported_mix);
+    let neck = mix(neck_heuristic, atlas_b.b, imported_mix);
     let regional_scale = clamp(u.regional_a.x, 0.0, 1.0);
     let n = nose * regional_scale;
     let c2 = cheeks * regional_scale;
@@ -277,27 +347,16 @@ fn region_detail(c: vec3<f32>) -> RegionDetail {
     let sum = n + c2 + f + ch + e + ey + ne;
     let cover = clamp(sum, 0.0, 1.0);
     let safe_sum = max(sum, 0.0001);
-
-    let large_avg = (
-        n * 1.00 + c2 * 0.20 + f * 0.00 + ch * 0.45 + e * 0.00 + ey * 0.00 + ne * 0.00
-    ) / safe_sum;
-    let primary_avg = (
-        n * 0.85 + c2 * 1.00 + f * 0.55 + ch * 1.00 + e * 0.60 + ey * 0.20 + ne * 0.45
-    ) / safe_sum;
-    let fine_avg = (
-        n * 0.40 + c2 * 0.70 + f * 1.00 + ch * 0.60 + e * 0.80 + ey * 0.90 + ne * 1.00
-    ) / safe_sum;
-    let visibility_avg = (
-        n * u.regional_a.y + c2 * u.regional_a.z + f * u.regional_a.w
-        + ch * u.regional_b.x + e * u.regional_b.y + ey * u.regional_b.z + ne * u.regional_b.w
-    ) / safe_sum;
-
+    let large_avg = (n * 1.00 + c2 * 0.20 + f * 0.00 + ch * 0.45 + e * 0.00 + ey * 0.00 + ne * 0.00) / safe_sum;
+    let primary_avg = (n * 0.85 + c2 * 1.00 + f * 0.55 + ch * 1.00 + e * 0.60 + ey * 0.20 + ne * 0.45) / safe_sum;
+    let fine_avg = (n * 0.40 + c2 * 0.70 + f * 1.00 + ch * 0.60 + e * 0.80 + ey * 0.90 + ne * 1.00) / safe_sum;
+    let visibility_avg = (n * u.regional_a.y + c2 * u.regional_a.z + f * u.regional_a.w + ch * u.regional_b.x + e * u.regional_b.y + ey * u.regional_b.z + ne * u.regional_b.w) / safe_sum;
     var result: RegionDetail;
     result.large_pores = large_avg * cover;
     result.primary_pores = primary_avg * cover + (1.0 - cover);
     result.fine_pores = fine_avg * cover + (1.0 - cover);
     result.visibility = visibility_avg * cover + (1.0 - cover);
-    result.hemoglobin = clamp(max(max(nose, c2), max(e, ey)), 0.0, 1.0);
+    result.hemoglobin = clamp(max(max(nose, cheeks), max(ears, eyes)), 0.0, 1.0);
     result.eye_area = clamp(eyes, 0.0, 1.0);
     return result;
 }
@@ -318,7 +377,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let pore_micro_scale = clamp(u.pore_controls.w, 40.0, 320.0) * pore_scale;
     let pore_irregularity = clamp(u.pore_variation.x, 0.0, 1.0);
     let pore_size_variation = clamp(u.pore_variation.y, 0.0, 1.0);
-    let regions = region_detail(input.region_position);
+    let regions = region_detail(input.region_position, input.uv_data);
 
     // Original node chain: Noise(Color) * 0.055 * Pore Irregularity, added to
     // shared object-space skin coordinates before the three Voronoi populations.
@@ -439,21 +498,48 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
         clamp(u.reference_controls.x * reference_region, 0.0, 1.0)
     );
 
-    let ndotl = max(dot(perturbed_normal, light_direction), 0.0);
+    let crosshatch_strength = clamp(u.crosshatch_controls.x, 0.0, 1.0) * regions.visibility;
+    let crosshatch_height = 1.0 - crosshatch_height_triplanar(
+        skin_position, normal,
+        clamp(u.crosshatch_controls.y, 15.0, 600.0),
+        clamp(u.crosshatch_controls.z, -180.0, 180.0) * 0.01745329252,
+        clamp(u.crosshatch_controls.w, 0.0, 1.0)
+    );
+    let crosshatch_normal = bump_from_height(
+        perturbed_normal, metric_position, crosshatch_height,
+        0.000055 * clamp(u.crosshatch_aux.x, 0.1, 4.0),
+        clamp(crosshatch_strength, 0.0, 1.0)
+    );
+    let wrinkle_strength = clamp(u.wrinkle_controls.x, 0.0, 1.0) * regions.visibility;
+    let wrinkle_height = 1.0 - wrinkle_height_triplanar(
+        skin_position, normal,
+        clamp(u.wrinkle_controls.y, 8.0, 400.0),
+        clamp(u.wrinkle_controls.z, -180.0, 180.0) * 0.01745329252,
+        clamp(u.wrinkle_controls.w, 0.0, 1.0),
+        clamp(u.wrinkle_aux.z, 0.05, 0.5)
+    );
+    let final_normal = bump_from_height(
+        crosshatch_normal, metric_position, wrinkle_height,
+        0.000085 * clamp(u.wrinkle_aux.x, 0.1, 4.0),
+        clamp(wrinkle_strength, 0.0, 1.0)
+    );
+    let ndotl = max(dot(final_normal, light_direction), 0.0);
     let diffuse = 0.25 + ndotl * 0.75;
     let oiliness = clamp(u.pigment_detail.z, 0.0, 1.0);
     let roughness = clamp(
         mix(u.surface.x, u.surface.x * 0.42, oiliness)
         + (grain_height - 0.5) * clamp(u.grain_controls.z, 0.0, 0.15)
-        + (reference_cavity - 0.2) * clamp(u.reference_aux.y, 0.0, 0.6),
+        + (reference_cavity - 0.2) * clamp(u.reference_aux.y, 0.0, 0.6)
+        + (1.0 - crosshatch_height) * clamp(u.crosshatch_aux.y, 0.0, 0.2) * crosshatch_strength
+        + (1.0 - wrinkle_height) * clamp(u.wrinkle_aux.y, 0.0, 0.2) * wrinkle_strength,
         0.035,
         1.0
     );
     let specular_power = mix(180.0, 5.0, roughness);
     let specular_strength = clamp(u.surface.y + oiliness * 0.35, 0.0, 1.0)
         * (1.0 - clamp(pore_specular_mask * u.optical_controls.x, 0.0, 0.9));
-    let specular = pow(max(dot(perturbed_normal, half_vector), 0.0), specular_power) * specular_strength;
-    let back_scatter = pow(max(dot(-perturbed_normal, light_direction), 0.0), 2.0) * u.surface.z;
+    let specular = pow(max(dot(final_normal, half_vector), 0.0), specular_power) * specular_strength;
+    let back_scatter = pow(max(dot(-final_normal, light_direction), 0.0), 2.0) * u.surface.z;
 
     // Source build_color_layer(): broad tone, melanin, erythema, golden warmth,
     // micro-color and legacy redness, followed by three separate mottled scales.
@@ -633,7 +719,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     var color = base * diffuse;
     color += base * back_scatter * vec3<f32>(1.0, 0.48, 0.30);
     color += vec3<f32>(1.0, 0.78, 0.63) * specular;
-    let fresnel = pow(1.0 - max(dot(perturbed_normal, view_direction), 0.0), 3.0);
+    let fresnel = pow(1.0 - max(dot(final_normal, view_direction), 0.0), 3.0);
     color += base * fresnel * 0.055;
     color = color / (vec3<f32>(1.0) + max(color, vec3<f32>(0.0)) * 0.22);
     // The sRGB render target performs the display transfer automatically.

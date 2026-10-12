@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use eframe::egui;
 use crate::{
+    anatomical_masks::load_png as load_anatomical_mask_png,
     material::{CoordinateUnit, SkinMaterial, SkinPreset, load_preset, save_preset},
     reference_height::ReferenceHeightSettings,
     render::SkinPreview,
@@ -124,6 +125,27 @@ impl SkinStudioApp {
             "Generating reference skin height · {} px · seed {}",
             settings.resolution, settings.seed
         );
+    }
+
+    fn import_anatomical_masks(&mut self) {
+        let Some(path_a) = rfd::FileDialog::new().add_filter("RGBA anatomical mask atlas", &["png"])
+            .set_title("Select Anatomical Mask Atlas A").pick_file() else { return; };
+        let Some(path_b) = rfd::FileDialog::new().add_filter("RGBA anatomical mask atlas", &["png"])
+            .set_title("Select Anatomical Mask Atlas B").pick_file() else { return; };
+        let atlas_a = match load_anatomical_mask_png(&path_a) {
+            Ok(atlas) => atlas, Err(error) => { self.status = format!("Mask atlas A failed: {error}"); return; }
+        };
+        let atlas_b = match load_anatomical_mask_png(&path_b) {
+            Ok(atlas) => atlas, Err(error) => { self.status = format!("Mask atlas B failed: {error}"); return; }
+        };
+        match self.preview.set_anatomical_masks(atlas_a, atlas_b) {
+            Ok(()) => self.status = "Anatomical RGBA masks loaded and enabled".to_owned(),
+            Err(error) => self.status = format!("Anatomical masks rejected: {error}"),
+        }
+    }
+    fn clear_anatomical_masks(&mut self) {
+        self.preview.clear_anatomical_masks();
+        self.status = "Anatomical masks cleared; procedural region fallback enabled".to_owned();
     }
 
     fn import_mesh(&mut self) {
@@ -325,6 +347,36 @@ impl SkinStudioApp {
                 ui.label("UV-based albedo variation uses OBJ vt / glTF TEXCOORD_0. Meshes without UVs use bbox coordinates; anatomical masks are still approximated by head-oriented heuristics.");
             }
             StudioTab::Detail => {
+                ui.label(egui::RichText::new("Directional Crosshatch").strong());
+                ui.add(egui::Slider::new(&mut self.params.crosshatch_strength, 0.0..=1.0).text("Crosshatch strength"));
+                ui.add(egui::Slider::new(&mut self.params.crosshatch_scale, 15.0..=600.0).text("Crosshatch scale"));
+                ui.add(egui::Slider::new(&mut self.params.crosshatch_angle, -180.0..=180.0).text("Orientation (degrees)"));
+                ui.add(egui::Slider::new(&mut self.params.crosshatch_breakup, 0.0..=1.0).text("Line breakup"));
+                ui.add(egui::Slider::new(&mut self.params.crosshatch_relief, 0.1..=4.0).text("Crosshatch relief"));
+                ui.add(egui::Slider::new(&mut self.params.crosshatch_roughness, 0.0..=0.2).text("Groove roughness"));
+                ui.separator();
+                ui.label(egui::RichText::new("Micro-wrinkles").strong());
+                ui.add(egui::Slider::new(&mut self.params.wrinkle_strength, 0.0..=1.0).text("Wrinkle strength"));
+                ui.add(egui::Slider::new(&mut self.params.wrinkle_scale, 8.0..=400.0).text("Wrinkle scale"));
+                ui.add(egui::Slider::new(&mut self.params.wrinkle_angle, -180.0..=180.0).text("Orientation (degrees)"));
+                ui.add(egui::Slider::new(&mut self.params.wrinkle_breakup, 0.0..=1.0).text("Wrinkle breakup"));
+                ui.add(egui::Slider::new(&mut self.params.wrinkle_length, 0.05..=0.5).text("Length / anisotropy"));
+                ui.add(egui::Slider::new(&mut self.params.wrinkle_relief, 0.1..=4.0).text("Wrinkle relief"));
+                ui.add(egui::Slider::new(&mut self.params.wrinkle_roughness, 0.0..=0.2).text("Wrinkle roughness"));
+                ui.separator();
+                ui.label(egui::RichText::new("Anatomical mask atlases").strong());
+                ui.add(egui::Slider::new(&mut self.params.anatomical_mask_strength, 0.0..=1.0).text("Imported mask influence"));
+                ui.horizontal(|ui| {
+                    if ui.button("Import 2 RGBA PNG atlases").clicked() { self.import_anatomical_masks(); }
+                    if ui.button("Clear masks").clicked() { self.clear_anatomical_masks(); }
+                });
+                ui.label(if self.preview.has_anatomical_masks() {
+                    "Imported masks active; they blend over heuristic regions by the chosen influence."
+                } else {
+                    "No atlases loaded: bbox heuristics remain active. Import both atlases to use UV-based anatomical masks."
+                });
+                ui.label("Atlas A: R Nose · G Cheeks · B Forehead · A Chin. Atlas B: R Ears · G Eye area · B Neck · A Skin/UV-island coverage. White = region present; black = absent. Match UV layout and resolution; keep space outside UV islands transparent.");
+                ui.separator();
                 ui.label(egui::RichText::new("Skin Line Network").strong());
                 ui.add(
                     egui::Slider::new(&mut self.params.skin_line_strength, 0.0..=1.5)

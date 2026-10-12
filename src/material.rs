@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::{error::Error, fmt, fs, path::Path};
 
-pub const PRESET_SCHEMA_VERSION: u32 = 8;
+pub const PRESET_SCHEMA_VERSION: u32 = 9;
 
 /// Real-world length used by the source add-on's Coord Scale conversion.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +88,22 @@ pub struct SkinMaterial {
     pub skin_line_thickness: f32,
     pub skin_line_relief: f32,
     pub skin_line_shading: f32,
+    pub crosshatch_strength: f32,
+    pub crosshatch_scale: f32,
+    /// Orientation in degrees in object-space projection.
+    pub crosshatch_angle: f32,
+    pub crosshatch_breakup: f32,
+    pub crosshatch_relief: f32,
+    pub crosshatch_roughness: f32,
+    pub wrinkle_strength: f32,
+    pub wrinkle_scale: f32,
+    pub wrinkle_angle: f32,
+    pub wrinkle_breakup: f32,
+    pub wrinkle_relief: f32,
+    pub wrinkle_roughness: f32,
+    pub wrinkle_length: f32,
+    /// Blend imported RGBA atlas weights with heuristic regional masks.
+    pub anatomical_mask_strength: f32,
     pub variation_scale: f32,
     pub redness_strength: f32,
     pub redness_scale: f32,
@@ -166,6 +182,20 @@ impl Default for SkinMaterial {
             skin_line_thickness: 0.35,
             skin_line_relief: 1.0,
             skin_line_shading: 0.18,
+            crosshatch_strength: 0.22,
+            crosshatch_scale: 165.0,
+            crosshatch_angle: 28.0,
+            crosshatch_breakup: 0.72,
+            crosshatch_relief: 0.75,
+            crosshatch_roughness: 0.025,
+            wrinkle_strength: 0.16,
+            wrinkle_scale: 82.0,
+            wrinkle_angle: -18.0,
+            wrinkle_breakup: 0.78,
+            wrinkle_relief: 0.8,
+            wrinkle_roughness: 0.035,
+            wrinkle_length: 0.18,
+            anatomical_mask_strength: 1.0,
             variation_scale: 4.0,
             redness_strength: 0.08,
             redness_scale: 18.0,
@@ -256,6 +286,20 @@ impl SkinMaterial {
         validate_range("skin_line_thickness", self.skin_line_thickness, 0.05, 1.0)?;
         validate_range("skin_line_relief", self.skin_line_relief, 0.1, 8.0)?;
         validate_range("skin_line_shading", self.skin_line_shading, 0.0, 1.0)?;
+        validate_range("crosshatch_strength", self.crosshatch_strength, 0.0, 1.0)?;
+        validate_range("crosshatch_scale", self.crosshatch_scale, 15.0, 600.0)?;
+        validate_range("crosshatch_angle", self.crosshatch_angle, -180.0, 180.0)?;
+        validate_range("crosshatch_breakup", self.crosshatch_breakup, 0.0, 1.0)?;
+        validate_range("crosshatch_relief", self.crosshatch_relief, 0.1, 4.0)?;
+        validate_range("crosshatch_roughness", self.crosshatch_roughness, 0.0, 0.2)?;
+        validate_range("wrinkle_strength", self.wrinkle_strength, 0.0, 1.0)?;
+        validate_range("wrinkle_scale", self.wrinkle_scale, 8.0, 400.0)?;
+        validate_range("wrinkle_angle", self.wrinkle_angle, -180.0, 180.0)?;
+        validate_range("wrinkle_breakup", self.wrinkle_breakup, 0.0, 1.0)?;
+        validate_range("wrinkle_relief", self.wrinkle_relief, 0.1, 4.0)?;
+        validate_range("wrinkle_roughness", self.wrinkle_roughness, 0.0, 0.2)?;
+        validate_range("wrinkle_length", self.wrinkle_length, 0.05, 0.5)?;
+        validate_range("anatomical_mask_strength", self.anatomical_mask_strength, 0.0, 1.0)?;
         validate_range("variation_scale", self.variation_scale, 0.1, 30.0)?;
         validate_range("redness_strength", self.redness_strength, 0.0, 1.0)?;
         validate_range("redness_scale", self.redness_scale, 0.5, 60.0)?;
@@ -486,6 +530,17 @@ impl SkinPreset {
             7 => {
                 // Schema 7 introduced the multi-scale color layer. Albedo Realism controls
                 // inherit the original add-on defaults in schema 8.
+                let old: SkinPreset =
+                    serde_json::from_str(source).map_err(PresetError::Json)?;
+                Self {
+                    schema_version: PRESET_SCHEMA_VERSION,
+                    name: old.name,
+                    material: old.material,
+                }
+            }
+            8 => {
+                // Schema 8 introduced UV Albedo Realism. Directional detail and
+                // imported anatomical masks inherit defaults in schema 9.
                 let old: SkinPreset =
                     serde_json::from_str(source).map_err(PresetError::Json)?;
                 Self {
@@ -737,6 +792,26 @@ mod tests {
         assert_eq!(migrated.material.albedo_hemoglobin_strength, 0.32);
         assert_eq!(migrated.material.albedo_melanin_strength, 0.26);
         assert_eq!(migrated.material.albedo_micro_variation_strength, 0.18);
+    }
+
+    #[test]
+    fn migrates_v8_presets_and_initializes_directional_detail_and_masks() {
+        let preset = SkinPreset::new("Schema 8", SkinMaterial::default()).unwrap();
+        let mut value: serde_json::Value =
+            serde_json::from_str(&preset.to_json_pretty().unwrap()).unwrap();
+        value["schema_version"] = serde_json::Value::from(8);
+        let object = value["material"].as_object_mut().unwrap();
+        for key in [
+            "crosshatch_strength", "crosshatch_scale", "crosshatch_angle",
+            "crosshatch_breakup", "crosshatch_relief", "crosshatch_roughness",
+            "wrinkle_strength", "wrinkle_scale", "wrinkle_angle", "wrinkle_breakup",
+            "wrinkle_relief", "wrinkle_roughness", "wrinkle_length", "anatomical_mask_strength",
+        ] { object.remove(key); }
+        let migrated = SkinPreset::from_json(&value.to_string()).unwrap();
+        assert_eq!(migrated.schema_version, PRESET_SCHEMA_VERSION);
+        assert_eq!(migrated.material.crosshatch_scale, 165.0);
+        assert_eq!(migrated.material.wrinkle_scale, 82.0);
+        assert_eq!(migrated.material.anatomical_mask_strength, 1.0);
     }
 
     #[test]

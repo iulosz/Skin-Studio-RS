@@ -1,4 +1,5 @@
 mod app;
+mod anatomical_masks;
 mod geometry;
 mod material;
 mod render;
