@@ -17,8 +17,9 @@ rustfft = "6.4"
 gltf = { version = "1.4", features = ["import"] }
 rfd = "0.16"
 image = { version = "0.25", default-features = false, features = ["png"] }
-# Assimp handles FBX using prebuilt static libraries.
-russimp-ng = { version = "3.2.7", features = ["prebuilt"] }
+# Build Assimp from the crate's source instead of downloading a prebuilt archive.
+# This avoids truncated release TAR downloads in hosted CI runners.
+russimp-ng = { version = "3.2.7", features = ["static-link"] }
 
 [dev-dependencies]
 naga = { version = "30", features = ["wgsl-in"] }
