@@ -423,7 +423,9 @@ impl From<SkinMaterialV1> for SkinMaterial {
             specular: old.specular,
             subsurface: old.subsurface,
             micro_relief: old.micro_relief,
-            ..Self::legacy_defaults()
+            // Schema v1 predates the later parameter sets; initialize those fields
+            // from the current material defaults, matching its migration contract.
+            ..Self::default()
         }
     }
 }
