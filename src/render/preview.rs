@@ -1,90 +1,470 @@
-use std::num::NonZeroU64;
+use std::{
+    num::NonZeroU64,
+    sync::{
+        Arc,
+        mpsc::{self, Receiver, TryRecvError},
+    },
+    thread,
+};
 
 use bytemuck::{Pod, Zeroable};
 use eframe::egui;
 use eframe::egui_wgpu::{self, wgpu};
+use glam::{Mat4, Vec3};
+use half::f16;
+use wgpu::util::DeviceExt;
 
-use crate::material::SkinMaterial;
+use crate::{
+    anatomical_masks::AnatomicalMaskAtlas,
+    geometry::{MeshData, MeshVertex},
+    material::SkinMaterial,
+    reference_height::{ReferenceHeightError, ReferenceHeightMap, ReferenceHeightSettings},
+    skin_detail::{PoreHeightMap, PoreMapError, PoreMapSettings},
+};
 
-const SHADER: &str = include_str!("skin_preview.wgsl");
+const MESH_SHADER: &str = include_str!("mesh_preview.wgsl");
+const GRID_SHADER: &str = include_str!("grid.wgsl");
+const DISPLAY_SHADER: &str = include_str!("display.wgsl");
+
+const MESH_VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 5] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3, 3 => Float32x3, 4 => Float32x3];
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct PreviewUniforms {
-    // viewport width/height in physical pixels, then viewport origin in physical pixels
-    viewport: [f32; 4],
-    // linear-ish RGB base colour + pore strength
-    color_pores: [f32; 4],
-    // roughness, specular, subsurface approximation, micro-relief
+struct ViewportUniforms {
+    view_projection: [[f32; 4]; 4],
+    camera_position: [f32; 4],
+    base_color: [f32; 4],
     surface: [f32; 4],
-    // hemoglobin tint, freckle strength, oiliness and pigment variation
     pigment_detail: [f32; 4],
+    pore_controls: [f32; 4],
+    pore_variation: [f32; 4],
+    grain_controls: [f32; 4],
+    regional_a: [f32; 4],
+    regional_b: [f32; 4],
+    optical_controls: [f32; 4],
+    coordinate_controls: [f32; 4],
+    reference_controls: [f32; 4],
+    reference_aux: [f32; 4],
+    skin_line_controls: [f32; 4],
+    skin_line_aux: [f32; 4],
+    crosshatch_controls: [f32; 4],
+    crosshatch_aux: [f32; 4],
+    wrinkle_controls: [f32; 4],
+    wrinkle_aux: [f32; 4],
+    anatomy_controls: [f32; 4],
+    color_controls: [f32; 4],
+    color_scales: [f32; 4],
+    chromatic_controls: [f32; 4],
+    chromatic_scales: [f32; 4],
+    mottled_controls: [f32; 4],
+    albedo_controls: [f32; 4],
 }
 
-struct SkinRenderResources {
-    pipeline: wgpu::RenderPipeline,
+struct GpuMesh {
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+    revision: u64,
+}
+
+struct GpuPoreMap {
+    _texture: wgpu::Texture,
     bind_group: wgpu::BindGroup,
-    uniform_buffer: wgpu::Buffer,
+    revision: u64,
 }
 
-impl SkinRenderResources {
-    fn paint(&self, render_pass: &mut wgpu::RenderPass<'_>) {
-        render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_bind_group(0, &self.bind_group, &[]);
-        render_pass.draw(0..3, 0..1);
+struct GpuReferenceMap {
+    _texture: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
+    revision: u64,
+}
+struct GpuAnatomicalMasks {
+    _texture_a: wgpu::Texture,
+    _texture_b: wgpu::Texture,
+    bind_group: wgpu::BindGroup,
+    revision: u64,
+}
+fn upload_anatomical_mask_texture(
+    device: &wgpu::Device, queue: &wgpu::Queue, label: &'static str, atlas: &AnatomicalMaskAtlas,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size: wgpu::Extent3d { width: atlas.width, height: atlas.height, depth_or_array_layers: 1 },
+        mip_level_count: 1, sample_count: 1, dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        &atlas.pixels,
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(atlas.width * 4), rows_per_image: Some(atlas.height) },
+        wgpu::Extent3d { width: atlas.width, height: atlas.height, depth_or_array_layers: 1 },
+    );
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
+}
+
+struct ViewportTarget {
+    _color_texture: wgpu::Texture,
+    color_view: wgpu::TextureView,
+    _depth_texture: wgpu::Texture,
+    depth_view: wgpu::TextureView,
+    display_bind_group: wgpu::BindGroup,
+    width: u32,
+    height: u32,
+}
+
+impl ViewportTarget {
+    fn new(
+        device: &wgpu::Device,
+        display_layout: &wgpu::BindGroupLayout,
+        sampler: &wgpu::Sampler,
+        width: u32,
+        height: u32,
+    ) -> Self {
+        let color_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Skin Studio 3D viewport color"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let color_view = color_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("Skin Studio 3D viewport depth"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let depth_view = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let display_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Skin Studio viewport display texture binding"),
+            layout: display_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&color_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        });
+        Self {
+            _color_texture: color_texture,
+            color_view,
+            _depth_texture: depth_texture,
+            depth_view,
+            display_bind_group,
+            width,
+            height,
+        }
     }
 }
 
-/// Initial custom GPU renderer for the material look-development sphere.
-/// Geometry is ray-intersected in WGSL for this first milestone; the next stage
-/// replaces this preview primitive with imported triangle meshes and a PBR pipeline.
-pub struct SkinPreview {
-    available: bool,
+struct SkinRenderResources {
+    mesh_pipeline: wgpu::RenderPipeline,
+    grid_pipeline: wgpu::RenderPipeline,
+    display_pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind_group: wgpu::BindGroup,
+    pore_bind_group_layout: wgpu::BindGroupLayout,
+    pore_sampler: wgpu::Sampler,
+    pore_map: Option<GpuPoreMap>,
+    reference_bind_group_layout: wgpu::BindGroupLayout,
+    reference_sampler: wgpu::Sampler,
+    reference_map: Option<GpuReferenceMap>,
+    anatomy_mask_bind_group_layout: wgpu::BindGroupLayout,
+    anatomy_mask_sampler: wgpu::Sampler,
+    anatomy_masks: Option<GpuAnatomicalMasks>,
+    display_bind_group_layout: wgpu::BindGroupLayout,
+    display_sampler: wgpu::Sampler,
+    grid_buffer: wgpu::Buffer,
+    grid_vertex_count: u32,
+    mesh: Option<GpuMesh>,
+    target: Option<ViewportTarget>,
 }
 
-impl SkinPreview {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let Some(state) = cc.wgpu_render_state.as_ref() else {
-            return Self { available: false };
-        };
+fn mesh_vertex_layout() -> wgpu::VertexBufferLayout<'static> {
+    wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<MeshVertex>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes: &MESH_VERTEX_ATTRIBUTES,
+    }
+}
 
+impl SkinRenderResources {
+    fn new(state: &eframe::egui_wgpu::RenderState) -> Self {
         let device = &state.device;
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("Skin Studio procedural preview shader"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
-        });
 
-        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Skin Studio preview uniforms layout"),
+        let uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Skin Studio mesh preview uniforms"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: NonZeroU64::new(std::mem::size_of::<PreviewUniforms>() as u64),
+                    min_binding_size: NonZeroU64::new(
+                        std::mem::size_of::<ViewportUniforms>() as u64,
+                    ),
                 },
                 count: None,
             }],
         });
-
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Skin Studio preview pipeline layout"),
-            bind_group_layouts: &[Some(&bind_group_layout)],
-            immediate_size: 0,
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Skin Studio viewport uniforms"),
+            size: std::mem::size_of::<ViewportUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Skin Studio viewport uniform binding"),
+            layout: &uniform_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
         });
 
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Skin Studio procedural material preview pipeline"),
-            layout: Some(&pipeline_layout),
+        let pore_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Skin Studio linear pore-height texture layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let pore_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Skin Studio tileable pore-height sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+        let reference_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Skin Studio reference-height texture layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
+        let reference_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Skin Studio repeat reference-height sampler"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let anatomy_mask_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Skin Studio anatomical mask atlas layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry { binding: 0, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 1, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+                wgpu::BindGroupLayoutEntry { binding: 2, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Texture { sample_type: wgpu::TextureSampleType::Float { filterable: true }, view_dimension: wgpu::TextureViewDimension::D2, multisampled: false }, count: None },
+                wgpu::BindGroupLayoutEntry { binding: 3, visibility: wgpu::ShaderStages::FRAGMENT, ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering), count: None },
+            ],
+        });
+        let anatomy_mask_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Skin Studio anatomical mask sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+
+        let mesh_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Skin Studio PBR-like mesh preview shader"),
+            source: wgpu::ShaderSource::Wgsl(MESH_SHADER.into()),
+        });
+        let mesh_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Skin Studio mesh + pore-height pipeline layout"),
+            bind_group_layouts: &[
+                Some(&uniform_layout),
+                Some(&pore_bind_group_layout),
+                Some(&reference_bind_group_layout),
+                Some(&anatomy_mask_bind_group_layout),
+            ],
+            immediate_size: 0,
+        });
+        let mesh_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Skin Studio depth-tested mesh pipeline"),
+            layout: Some(&mesh_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &mesh_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[Some(mesh_vertex_layout())],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &mesh_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::TextureFormat::Rgba8UnormSrgb.into())],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let grid_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Skin Studio viewport grid shader"),
+            source: wgpu::ShaderSource::Wgsl(GRID_SHADER.into()),
+        });
+        let grid_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Skin Studio grid pipeline layout"),
+            bind_group_layouts: &[Some(&uniform_layout)],
+            immediate_size: 0,
+        });
+        let grid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Skin Studio depth-tested grid pipeline"),
+            layout: Some(&grid_layout),
+            vertex: wgpu::VertexState {
+                module: &grid_shader,
+                entry_point: Some("vs_main"),
+                buffers: &[Some(mesh_vertex_layout())],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &grid_shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::TextureFormat::Rgba8UnormSrgb.into())],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                cull_mode: None,
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+
+        let display_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Skin Studio viewport texture layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let display_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("Skin Studio viewport linear sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+            ..Default::default()
+        });
+        let display_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Skin Studio viewport composition shader"),
+            source: wgpu::ShaderSource::Wgsl(DISPLAY_SHADER.into()),
+        });
+        let display_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Skin Studio viewport composition layout"),
+                bind_group_layouts: &[Some(&display_layout)],
+                immediate_size: 0,
+            });
+        let display_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Skin Studio viewport composition pipeline"),
+            layout: Some(&display_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &display_shader,
                 entry_point: Some("vs_main"),
                 buffers: &[],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &display_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(state.target_format.into())],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -96,38 +476,279 @@ impl SkinPreview {
             cache: None,
         });
 
-        let initial = PreviewUniforms::zeroed();
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Skin Studio preview uniforms"),
-            size: std::mem::size_of::<PreviewUniforms>() as u64,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        state.queue.write_buffer(&uniform_buffer, 0, bytemuck::bytes_of(&initial));
-
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Skin Studio preview bind group"),
-            layout: &bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
+        let grid_vertices = make_grid_vertices();
+        let grid_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Skin Studio viewport grid vertices"),
+            contents: bytemuck::cast_slice(&grid_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
         });
 
+        Self {
+            mesh_pipeline,
+            grid_pipeline,
+            display_pipeline,
+            uniform_buffer,
+            uniform_bind_group,
+            pore_bind_group_layout,
+            pore_sampler,
+            pore_map: None,
+            reference_bind_group_layout,
+            reference_sampler,
+            reference_map: None,
+            anatomy_mask_bind_group_layout,
+            anatomy_mask_sampler,
+            anatomy_masks: None,
+            display_bind_group_layout: display_layout,
+            display_sampler,
+            grid_buffer,
+            grid_vertex_count: grid_vertices.len() as u32,
+            mesh: None,
+            target: None,
+        }
+    }
+}
+
+fn make_grid_vertices() -> Vec<MeshVertex> {
+    let mut vertices = Vec::with_capacity(204);
+    let half = 2.5_f32;
+    let floor_y = -0.88_f32;
+    let steps = 50_i32;
+    for step in -steps..=steps {
+        let offset = step as f32 * 0.1;
+        vertices.push(MeshVertex {
+            position: [offset, floor_y, -half],
+            normal: [0.0; 3],
+            skin_position: [offset, floor_y, -half],
+            region_position: [0.0; 3],
+            uv_data: [0.0; 3],
+        });
+        vertices.push(MeshVertex {
+            position: [offset, floor_y, half],
+            normal: [0.0; 3],
+            skin_position: [offset, floor_y, half],
+            region_position: [0.0; 3],
+            uv_data: [0.0; 3],
+        });
+        vertices.push(MeshVertex {
+            position: [-half, floor_y, offset],
+            normal: [0.0; 3],
+            skin_position: [-half, floor_y, offset],
+            region_position: [0.0; 3],
+            uv_data: [0.0; 3],
+        });
+        vertices.push(MeshVertex {
+            position: [half, floor_y, offset],
+            normal: [0.0; 3],
+            skin_position: [half, floor_y, offset],
+            region_position: [0.0; 3],
+            uv_data: [0.0; 3],
+        });
+    }
+    vertices
+}
+
+#[derive(Clone, Copy)]
+struct OrbitCamera {
+    yaw: f32,
+    pitch: f32,
+    distance: f32,
+    target: Vec3,
+}
+
+impl Default for OrbitCamera {
+    fn default() -> Self {
+        Self {
+            yaw: 0.35,
+            pitch: 0.12,
+            distance: 3.0,
+            target: Vec3::ZERO,
+        }
+    }
+}
+
+impl OrbitCamera {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn position(&self) -> Vec3 {
+        let direction = Vec3::new(
+            self.yaw.sin() * self.pitch.cos(),
+            self.pitch.sin(),
+            self.yaw.cos() * self.pitch.cos(),
+        );
+        self.target + direction * self.distance
+    }
+
+    fn view_projection(&self, aspect: f32) -> Mat4 {
+        let view = Mat4::look_at_rh(self.position(), self.target, Vec3::Y);
+        let projection = Mat4::perspective_rh(45_f32.to_radians(), aspect.max(0.1), 0.01, 100.0);
+        projection * view
+    }
+
+    fn orbit(&mut self, delta: egui::Vec2) {
+        self.yaw += delta.x * 0.008;
+        self.pitch = (self.pitch - delta.y * 0.008).clamp(-1.48, 1.48);
+    }
+
+    fn pan(&mut self, delta: egui::Vec2) {
+        let right = Vec3::new(self.yaw.cos(), 0.0, -self.yaw.sin());
+        let scale = self.distance * 0.0018;
+        self.target -= right * delta.x * scale;
+        self.target += Vec3::Y * delta.y * scale;
+    }
+
+    fn zoom(&mut self, scroll: f32) {
+        self.distance = (self.distance * (-scroll * 0.001).exp()).clamp(1.15, 30.0);
+    }
+}
+
+pub struct SkinPreview {
+    available: bool,
+    mesh: Arc<MeshData>,
+    mesh_revision: u64,
+    pore_map: Arc<PoreHeightMap>,
+    pore_map_revision: u64,
+    reference_map: Arc<ReferenceHeightMap>,
+    reference_map_revision: u64,
+    pending_reference_map: Option<Receiver<Result<ReferenceHeightMap, ReferenceHeightError>>>,
+    anatomical_mask_a: Arc<AnatomicalMaskAtlas>,
+    anatomical_mask_b: Arc<AnatomicalMaskAtlas>,
+    anatomical_mask_revision: u64,
+    anatomical_masks_loaded: bool,
+    camera: OrbitCamera,
+}
+
+impl SkinPreview {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mesh = Arc::new(MeshData::default_sphere());
+        let pore_map = Arc::new(
+            PoreHeightMap::generate(PoreMapSettings::default())
+                .expect("default pore-map settings must be valid"),
+        );
+        let reference_map = Arc::new(ReferenceHeightMap::flat(256));
+        let Some(state) = cc.wgpu_render_state.as_ref() else {
+            return Self {
+                available: false,
+                mesh,
+                mesh_revision: 1,
+                pore_map,
+                pore_map_revision: 1,
+                reference_map,
+                reference_map_revision: 1,
+                pending_reference_map: None,
+                anatomical_mask_a: Arc::new(AnatomicalMaskAtlas::blank()),
+                anatomical_mask_b: Arc::new(AnatomicalMaskAtlas::blank()),
+                anatomical_mask_revision: 0,
+                anatomical_masks_loaded: false,
+                camera: OrbitCamera::default(),
+            };
+        };
         state
             .renderer
             .write()
             .callback_resources
-            .insert(SkinRenderResources {
-                pipeline,
-                bind_group,
-                uniform_buffer,
-            });
+            .insert(SkinRenderResources::new(state));
 
-        Self { available: true }
+        Self {
+            available: true,
+            mesh,
+            mesh_revision: 1,
+            pore_map,
+            pore_map_revision: 1,
+            reference_map,
+            reference_map_revision: 1,
+            pending_reference_map: None,
+            anatomical_mask_a: Arc::new(AnatomicalMaskAtlas::blank()),
+            anatomical_mask_b: Arc::new(AnatomicalMaskAtlas::blank()),
+            anatomical_mask_revision: 0,
+            anatomical_masks_loaded: false,
+            camera: OrbitCamera::default(),
+        }
     }
 
-    pub fn show(&self, ui: &mut egui::Ui, params: SkinMaterial) {
+    pub fn set_mesh(&mut self, mesh: MeshData) {
+        self.mesh = Arc::new(mesh);
+        self.mesh_revision = self.mesh_revision.wrapping_add(1);
+        self.camera.reset();
+    }
+
+    pub fn set_anatomical_masks(&mut self, atlas_a: AnatomicalMaskAtlas, atlas_b: AnatomicalMaskAtlas) -> Result<(), String> {
+        atlas_a.validate()?;
+        atlas_b.validate()?;
+        if atlas_a.width != atlas_b.width || atlas_a.height != atlas_b.height {
+            return Err("Os dois atlas anatômicos precisam ter a mesma resolução".to_owned());
+        }
+        self.anatomical_mask_a = Arc::new(atlas_a);
+        self.anatomical_mask_b = Arc::new(atlas_b);
+        self.anatomical_mask_revision = self.anatomical_mask_revision.wrapping_add(1);
+        self.anatomical_masks_loaded = true;
+        Ok(())
+    }
+    pub fn clear_anatomical_masks(&mut self) {
+        self.anatomical_mask_a = Arc::new(AnatomicalMaskAtlas::blank());
+        self.anatomical_mask_b = Arc::new(AnatomicalMaskAtlas::blank());
+        self.anatomical_mask_revision = self.anatomical_mask_revision.wrapping_add(1);
+        self.anatomical_masks_loaded = false;
+    }
+    pub fn has_anatomical_masks(&self) -> bool { self.anatomical_masks_loaded }
+
+    pub fn mesh_name(&self) -> &str {
+        &self.mesh.name
+    }
+
+    pub fn vertex_count(&self) -> usize {
+        self.mesh.vertex_count()
+    }
+
+    pub fn triangle_count(&self) -> usize {
+        self.mesh.triangle_count()
+    }
+
+    pub fn reset_camera(&mut self) {
+        self.camera.reset();
+    }
+
+    pub fn regenerate_pore_map(&mut self, settings: PoreMapSettings) -> Result<(), PoreMapError> {
+        let map = PoreHeightMap::generate(settings)?;
+        self.pore_map = Arc::new(map);
+        self.pore_map_revision = self.pore_map_revision.wrapping_add(1);
+        Ok(())
+    }
+
+    pub fn request_reference_map_generation(&mut self, settings: ReferenceHeightSettings) {
+        let (sender, receiver) = mpsc::channel();
+        self.pending_reference_map = Some(receiver);
+        thread::spawn(move || {
+            let _ = sender.send(ReferenceHeightMap::generate(settings));
+        });
+    }
+
+    pub fn poll_reference_map_generation(&mut self) -> Option<Result<(), String>> {
+        let received = match self.pending_reference_map.as_ref()?.try_recv() {
+            Ok(result) => result,
+            Err(TryRecvError::Empty) => return None,
+            Err(TryRecvError::Disconnected) => {
+                self.pending_reference_map = None;
+                return Some(Err("Reference-height worker disconnected".to_owned()));
+            }
+        };
+        self.pending_reference_map = None;
+        match received {
+            Ok(map) => {
+                self.reference_map = Arc::new(map);
+                self.reference_map_revision = self.reference_map_revision.wrapping_add(1);
+                Some(Ok(()))
+            }
+            Err(error) => Some(Err(error.to_string())),
+        }
+    }
+
+    pub fn reference_map_generation_pending(&self) -> bool {
+        self.pending_reference_map.is_some()
+    }
+
+    pub fn show(&mut self, ui: &mut egui::Ui, params: SkinMaterial, show_grid: bool) {
         if !self.available {
             ui.centered_and_justified(|ui| {
                 ui.label("O backend WGPU não foi inicializado. Verifique o suporte gráfico do sistema.");
@@ -136,16 +757,33 @@ impl SkinPreview {
         }
 
         let desired_size = ui.available_size().max(egui::vec2(320.0, 320.0));
-        let (rect, _response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
+        let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::drag());
+
+        if response.dragged() {
+            let delta = ui.input(|input| input.pointer.delta());
+            if ui.input(|input| input.modifiers.shift) {
+                self.camera.pan(delta);
+            } else {
+                self.camera.orbit(delta);
+            }
+        }
+        if response.hovered() {
+            let scroll = ui.input(|input| input.smooth_scroll_delta.y);
+            if scroll.abs() > 0.0 {
+                self.camera.zoom(scroll);
+            }
+        }
+
         let pixels_per_point = ui.ctx().pixels_per_point();
-        let uniform = PreviewUniforms {
-            viewport: [
-                rect.width() * pixels_per_point,
-                rect.height() * pixels_per_point,
-                rect.min.x * pixels_per_point,
-                rect.min.y * pixels_per_point,
-            ],
-            color_pores: [
+        let width = (rect.width() * pixels_per_point).round().clamp(1.0, 4096.0) as u32;
+        let height = (rect.height() * pixels_per_point).round().clamp(1.0, 4096.0) as u32;
+        let view_projection = self
+            .camera
+            .view_projection(width as f32 / height.max(1) as f32);
+        let uniform = ViewportUniforms {
+            view_projection: view_projection.to_cols_array_2d(),
+            camera_position: self.camera.position().extend(1.0).to_array(),
+            base_color: [
                 params.base_color[0],
                 params.base_color[1],
                 params.base_color[2],
@@ -163,36 +801,418 @@ impl SkinPreview {
                 params.oiliness,
                 params.pigment_variation,
             ],
+            pore_controls: [
+                params.pore_scale,
+                params.pore_color_strength,
+                params.pore_micro_detail,
+                params.pore_micro_scale,
+            ],
+            pore_variation: [
+                params.pore_irregularity,
+                params.pore_size_variation,
+                params.fine_detail_strength,
+                params.fine_detail_scale,
+            ],
+            grain_controls: [
+                params.micro_grain_strength,
+                params.micro_grain_scale,
+                params.micro_grain_roughness,
+                params.micro_relief,
+            ],
+            regional_a: [
+                params.regional_relief,
+                params.pore_vis_nose,
+                params.pore_vis_cheeks,
+                params.pore_vis_forehead,
+            ],
+            regional_b: [
+                params.pore_vis_chin,
+                params.pore_vis_ears,
+                params.pore_vis_eye_area,
+                params.pore_vis_neck,
+            ],
+            optical_controls: [params.spec_pore_occlusion, 0.0, 0.0, 0.0],
+            coordinate_controls: [
+                params.coord_unit.meters_per_unit(params.coord_custom_meters_per_unit),
+                params.pore_map_density,
+                0.0,
+                0.0,
+            ],
+            reference_controls: [
+                params.reference_strength,
+                0.37 * params.reference_relief * params.reference_cell_mm / 1000.0,
+                0.22 / (
+                    self.reference_map.cells_per_tile.max(1) as f32
+                        * params.reference_cell_mm
+                        / 1000.0
+                ),
+                params.reference_pores,
+            ],
+            reference_aux: [
+                params.reference_color,
+                params.reference_rough,
+                params.reference_regional,
+                params.reference_relief,
+            ],
+            skin_line_controls: [
+                params.skin_line_strength,
+                params.skin_line_scale,
+                params.skin_line_thickness,
+                params.skin_line_relief,
+            ],
+            skin_line_aux: [params.skin_line_shading, 0.0, 0.0, 0.0],
+            color_controls: [
+                params.pigment_variation,
+                params.redness_strength,
+                params.skin_warmth,
+                params.melanin_variation,
+            ],
+            color_scales: [
+                params.variation_scale,
+                params.redness_scale,
+                params.melanin_scale,
+                params.erythema_scale,
+            ],
+            chromatic_controls: [
+                params.erythema_strength,
+                params.golden_variation,
+                params.micro_color_strength,
+                0.0,
+            ],
+            chromatic_scales: [
+                params.golden_scale,
+                params.micro_color_scale,
+                params.mottled_scale_macro,
+                params.mottled_scale_medium,
+            ],
+            mottled_controls: [
+                params.mottled_scale_micro,
+                if params.mottled_enable { params.mottled_strength } else { 0.0 },
+                params.mottled_variation,
+                params.mottled_contrast,
+            ],
+            crosshatch_controls: [params.crosshatch_strength, params.crosshatch_scale, params.crosshatch_angle, params.crosshatch_breakup],
+            crosshatch_aux: [params.crosshatch_relief, params.crosshatch_roughness, 0.0, 0.0],
+            wrinkle_controls: [params.wrinkle_strength, params.wrinkle_scale, params.wrinkle_angle, params.wrinkle_breakup],
+            wrinkle_aux: [params.wrinkle_relief, params.wrinkle_roughness, params.wrinkle_length, 0.0],
+            anatomy_controls: [params.anatomical_mask_strength, if self.anatomical_masks_loaded { 1.0 } else { 0.0 }, 0.0, 0.0],
+            albedo_controls: [
+                params.albedo_realism_strength,
+                params.albedo_hemoglobin_strength,
+                params.albedo_melanin_strength,
+                params.albedo_micro_variation_strength,
+            ],
         };
 
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(
             rect,
-            SkinPreviewCallback { uniform },
+            MeshPreviewCallback {
+                uniform,
+                width,
+                height,
+                mesh: Arc::clone(&self.mesh),
+                mesh_revision: self.mesh_revision,
+                pore_map: Arc::clone(&self.pore_map),
+                pore_map_revision: self.pore_map_revision,
+                reference_map: Arc::clone(&self.reference_map),
+                reference_map_revision: self.reference_map_revision,
+                anatomical_mask_a: Arc::clone(&self.anatomical_mask_a),
+                anatomical_mask_b: Arc::clone(&self.anatomical_mask_b),
+                anatomical_mask_revision: self.anatomical_mask_revision,
+                show_grid,
+            },
         ));
     }
 }
 
-struct SkinPreviewCallback {
-    uniform: PreviewUniforms,
+struct MeshPreviewCallback {
+    uniform: ViewportUniforms,
+    width: u32,
+    height: u32,
+    mesh: Arc<MeshData>,
+    mesh_revision: u64,
+    pore_map: Arc<PoreHeightMap>,
+    pore_map_revision: u64,
+    reference_map: Arc<ReferenceHeightMap>,
+    reference_map_revision: u64,
+    anatomical_mask_a: Arc<AnatomicalMaskAtlas>,
+    anatomical_mask_b: Arc<AnatomicalMaskAtlas>,
+    anatomical_mask_revision: u64,
+    show_grid: bool,
 }
 
-impl egui_wgpu::CallbackTrait for SkinPreviewCallback {
+impl eframe::egui_wgpu::CallbackTrait for MeshPreviewCallback {
     fn prepare(
         &self,
-        _device: &wgpu::Device,
+        device: &wgpu::Device,
         queue: &wgpu::Queue,
         _screen_descriptor: &egui_wgpu::ScreenDescriptor,
-        _encoder: &mut wgpu::CommandEncoder,
+        encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        let resources: &SkinRenderResources = callback_resources.get().expect(
-            "Skin Studio renderer resources were not initialized",
-        );
+        let resources: &mut SkinRenderResources = callback_resources
+            .get_mut()
+            .expect("Skin Studio renderer resources were not initialized");
+
+        let needs_target = resources
+            .target
+            .as_ref()
+            .is_none_or(|target| target.width != self.width || target.height != self.height);
+        if needs_target {
+            resources.target = Some(ViewportTarget::new(
+                device,
+                &resources.display_bind_group_layout,
+                &resources.display_sampler,
+                self.width,
+                self.height,
+            ));
+        }
+
+        let needs_pore_map = resources
+            .pore_map
+            .as_ref()
+            .is_none_or(|map| map.revision != self.pore_map_revision);
+        if needs_pore_map {
+            let size = self.pore_map.resolution;
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Skin Studio generated pore height map (R16Float, non-color)"),
+                size: wgpu::Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let half_pixels: Vec<u16> = self
+                .pore_map
+                .values
+                .iter()
+                .map(|value| f16::from_f32(*value).to_bits())
+                .collect();
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                bytemuck::cast_slice(&half_pixels),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(size * std::mem::size_of::<u16>() as u32),
+                    rows_per_image: Some(size),
+                },
+                wgpu::Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+            );
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Skin Studio pore height texture binding"),
+                layout: &resources.pore_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&resources.pore_sampler),
+                    },
+                ],
+            });
+            resources.pore_map = Some(GpuPoreMap {
+                _texture: texture,
+                bind_group,
+                revision: self.pore_map_revision,
+            });
+        }
+
+        let needs_reference_map = resources
+            .reference_map
+            .as_ref()
+            .is_none_or(|map| map.revision != self.reference_map_revision);
+        if needs_reference_map {
+            let size = self.reference_map.resolution;
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("Skin Studio reference skin height map (R16Float, non-color)"),
+                size: wgpu::Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::R16Float,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let half_pixels: Vec<u16> = self
+                .reference_map
+                .values
+                .iter()
+                .map(|value| f16::from_f32(*value).to_bits())
+                .collect();
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                bytemuck::cast_slice(&half_pixels),
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(size * std::mem::size_of::<u16>() as u32),
+                    rows_per_image: Some(size),
+                },
+                wgpu::Extent3d {
+                    width: size,
+                    height: size,
+                    depth_or_array_layers: 1,
+                },
+            );
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Skin Studio reference-height texture binding"),
+                layout: &resources.reference_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&resources.reference_sampler),
+                    },
+                ],
+            });
+            resources.reference_map = Some(GpuReferenceMap {
+                _texture: texture,
+                bind_group,
+                revision: self.reference_map_revision,
+            });
+        }
+
+        let needs_anatomical_masks = resources.anatomy_masks.as_ref()
+            .is_none_or(|maps| maps.revision != self.anatomical_mask_revision);
+        if needs_anatomical_masks {
+            let (texture_a, view_a) = upload_anatomical_mask_texture(device, queue, "Skin Studio anatomical mask atlas A", &self.anatomical_mask_a);
+            let (texture_b, view_b) = upload_anatomical_mask_texture(device, queue, "Skin Studio anatomical mask atlas B", &self.anatomical_mask_b);
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("Skin Studio anatomical masks binding"),
+                layout: &resources.anatomy_mask_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view_a) },
+                    wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&resources.anatomy_mask_sampler) },
+                    wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&view_b) },
+                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::Sampler(&resources.anatomy_mask_sampler) },
+                ],
+            });
+            resources.anatomy_masks = Some(GpuAnatomicalMasks {
+                _texture_a: texture_a, _texture_b: texture_b, bind_group,
+                revision: self.anatomical_mask_revision,
+            });
+        }
+
+        let needs_mesh = resources
+            .mesh
+            .as_ref()
+            .is_none_or(|mesh| mesh.revision != self.mesh_revision);
+        if needs_mesh {
+            let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Skin Studio active mesh vertices"),
+                contents: bytemuck::cast_slice(&self.mesh.vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+            let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Skin Studio active mesh indices"),
+                contents: bytemuck::cast_slice(&self.mesh.indices),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+            resources.mesh = Some(GpuMesh {
+                vertex_buffer,
+                index_buffer,
+                index_count: self.mesh.indices.len() as u32,
+                revision: self.mesh_revision,
+            });
+        }
+
         queue.write_buffer(
             &resources.uniform_buffer,
             0,
             bytemuck::bytes_of(&self.uniform),
         );
+        let target = resources
+            .target
+            .as_ref()
+            .expect("viewport target should be available after creation");
+        let mesh = resources
+            .mesh
+            .as_ref()
+            .expect("preview mesh should be available after upload");
+
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("Skin Studio 3D mesh viewport pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &target.color_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color {
+                        r: 0.075,
+                        g: 0.088,
+                        b: 0.105,
+                        a: 1.0,
+                    }),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &target.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+
+        render_pass.set_bind_group(0, &resources.uniform_bind_group, &[]);
+        if self.show_grid {
+            render_pass.set_pipeline(&resources.grid_pipeline);
+            render_pass.set_vertex_buffer(0, resources.grid_buffer.slice(..));
+            render_pass.draw(0..resources.grid_vertex_count, 0..1);
+        }
+        render_pass.set_pipeline(&resources.mesh_pipeline);
+        let pore_map = resources
+            .pore_map
+            .as_ref()
+            .expect("pore-height texture should be uploaded before the mesh pass");
+        render_pass.set_bind_group(1, &pore_map.bind_group, &[]);
+        let reference_map = resources
+            .reference_map
+            .as_ref()
+            .expect("reference-height texture should be uploaded before the mesh pass");
+        render_pass.set_bind_group(2, &reference_map.bind_group, &[]);
+        let anatomy_masks = resources.anatomy_masks.as_ref().expect("anatomical masks should be uploaded before mesh pass");
+        render_pass.set_bind_group(3, &anatomy_masks.bind_group, &[]);
+        render_pass.set_vertex_buffer(0, mesh.vertex_buffer.slice(..));
+        render_pass.set_index_buffer(mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+        render_pass.draw_indexed(0..mesh.index_count, 0, 0..1);
+        drop(render_pass);
+
         Vec::new()
     }
 
@@ -202,9 +1222,50 @@ impl egui_wgpu::CallbackTrait for SkinPreviewCallback {
         render_pass: &mut wgpu::RenderPass<'static>,
         callback_resources: &egui_wgpu::CallbackResources,
     ) {
-        let resources: &SkinRenderResources = callback_resources.get().expect(
-            "Skin Studio renderer resources were not initialized",
-        );
-        resources.paint(render_pass);
+        let resources: &SkinRenderResources = callback_resources
+            .get()
+            .expect("Skin Studio renderer resources were not initialized");
+        let target = resources
+            .target
+            .as_ref()
+            .expect("viewport texture should be available before composition");
+        render_pass.set_pipeline(&resources.display_pipeline);
+        render_pass.set_bind_group(0, &target.display_bind_group, &[]);
+        render_pass.draw(0..3, 0..1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn camera_view_projection_is_finite_for_landscape_and_portrait_viewports() {
+        let camera = OrbitCamera::default();
+        for aspect in [16.0 / 9.0, 1.0, 9.0 / 16.0] {
+            let matrix = camera.view_projection(aspect).to_cols_array();
+            assert!(matrix.iter().all(|value| value.is_finite()));
+        }
+    }
+
+    #[test]
+    fn zoom_is_clamped_to_a_useful_range() {
+        let mut camera = OrbitCamera::default();
+        camera.zoom(100_000.0);
+        assert!(camera.distance >= 1.15);
+        camera.zoom(-100_000.0);
+        assert!(camera.distance <= 30.0);
+    }
+
+    #[test]
+    fn mesh_shader_parses_and_validates_as_wgsl() {
+        let module = naga::front::wgsl::parse_str(MESH_SHADER)
+            .expect("mesh preview WGSL must parse");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("mesh preview WGSL must validate");
     }
 }

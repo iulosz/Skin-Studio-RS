@@ -1,6 +1,10 @@
 mod app;
+mod anatomical_masks;
+mod geometry;
 mod material;
 mod render;
+mod reference_height;
+mod skin_detail;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {

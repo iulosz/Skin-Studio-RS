@@ -6,22 +6,37 @@ Aplicativo desktop independente em Rust, criado para reconstruir gradualmente os
 
 - Interface desktop em Rust com navegação Setup, Color, Detail, Reference, Surface, Hair e Bake.
 - Pré-visualização de material usando shader WGSL próprio executado por `wgpu`.
-- Esfera procedural renderizada diretamente na GPU para validar a iluminação e os controles de material.
-- Controles funcionais de cor base, intensidade dos poros, micro-relevo, roughness, specular e uma aproximação simples de subsurface.
+- Viewport rasterizado de malhas triangulares com teste de profundidade e grade real.
+- Importação de malhas OBJ, glTF, GLB e FBX, com centralização e escala automáticas; FBX usa Assimp via `russimp-ng`, preservando UVs e normais quando disponíveis.
+- Câmera orbital com zoom, pan e restauração de enquadramento.
+- Esfera de demonstração como malha padrão para ajustar o material antes da importação de um modelo.
+- Controles de poros portados do Skin Studio 2.4.76: intensidade, escala, irregularidade, variação de tamanho, mapa de altura tileável, seed e relevo.
+- Shader WGSL com três populações Voronoi, projeção triplanar do height map de poros, fine detail, micro-grain e oclusão especular.
+- Gerador independente de Reference Height em Rust, com rede Voronoi em duas escalas, sulcos, poros nas junções e ruído periódico por FFT; a textura é enviada à GPU como R16Float não-color.
+- Skin Line Network no WGSL: células em platôs, sulcos primários/secundários, vincos mascarados por ruído, controle de escala física e sombreado dos sulcos.
+- Color layer portado com variação ampla, melanina, eritema, tom dourado, microcor, vermelhidão geral e manchas Mottled em três escalas, mantendo controles separados do addon.
+- UV `vt` do OBJ e `TEXCOORD_0` do glTF são preservados para a camada UV-based Albedo Realism, com broad/medium/micro variation, hemoglobina, tom periorbital e microvariação de melanina.
 - GitHub Actions com verificação de formato, testes e builds de release para Windows, Linux e macOS.
 
-**Ainda não é a conversão completa do addon.** Importação de malhas, shader anatômico equivalente, máscaras regionais e exportação de texturas ainda serão desenvolvidos. O parâmetro de viewport grid é apenas um item de interface neste protótipo.
+**Ainda não é a conversão completa do addon.** Crosshatch/micro-rugas e atlas de máscaras anatômicas já estão na implementação, mas precisam de comparação visual com o Blender. Máscaras importadas dependem de UVs; sem elas o sistema usa heurísticas aproximadas. Coord Scale inclui M/CM/MM/custom; estilo LEATHER do mapa de referência, pigmentos regionais adicionais, vascularização, lábios, SSS, cabelo e bake continuam no roadmap. A compilação não substitui comparação visual com o Blender.
+
+## Detail: crosshatch, micro-rugas e máscaras anatômicas
+
+O painel Detail possui controles separados para crosshatch direcional e microrrugas (intensidade, escala, orientação, breakup, relevo e roughness). As duas camadas usam projeção triplanar, independentemente da UV, e permanecem separadas da Skin Line Network celular.
+
+Para malhas com UV, importe dois atlas PNG RGBA de mesma resolução. Atlas A: R = nariz, G = bochechas, B = testa, A = queixo. Atlas B: R = orelhas, G = área dos olhos, B = pescoço, A = cobertura da pele/ilha UV. Branco indica região presente e preto indica ausência; mantenha áreas fora das ilhas UV transparentes. Os atlas precisam corresponder ao layout UV da malha. A influência dos atlas importados é controlável e o sistema retorna às heurísticas quando não há atlas/UV. Pintura direta dentro do aplicativo ainda não está disponível.
 
 ## Editor de pele — primeira etapa
 
 O painel de propriedades expõe controles para Base Color, tonalidade aproximada de hemoglobina, variação de pigmentação, poros, micro-relevo, sardas, rugosidade, especular, oleosidade e subsurface. Os ajustes são enviados em tempo real ao shader WGSL da pré-visualização.
 
-Os parâmetros são salvos em presets JSON versão 2. Presets versão 1 são migrados automaticamente, preservando os valores antigos e preenchendo os parâmetros novos com padrões seguros. Hemoglobina e sardas são efeitos procedurais de look development; ainda não representam máscaras anatômicas ou texturas calibradas.
+Os parâmetros são salvos em presets JSON versão 9. Presets versões 1 a 8 são migrados automaticamente, preservando os valores antigos e preenchendo os novos controles com valores padrão derivados do `__init__.py` original. Hemoglobina e sardas são efeitos procedurais de look development; ainda não representam máscaras anatômicas ou texturas calibradas.
 
 ## Tecnologias
 
 - Rust stable (a versão atual do `eframe` requer Rust 1.95 ou superior).
 - `egui` / `eframe` para a interface.
+- Assimp (`russimp-ng` compilado do código-fonte via CMake/MSVC) para importar FBX; não depende de baixar um arquivo TAR de bibliotecas pré-compiladas.
 - `wgpu` e WGSL para o renderizador GPU próprio do aplicativo.
 - `bytemuck` para empacotar uniformes enviados ao shader.
 
