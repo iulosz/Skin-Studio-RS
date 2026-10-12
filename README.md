@@ -36,7 +36,7 @@ Os parâmetros são salvos em presets JSON versão 9. Presets versões 1 a 8 sã
 
 - Rust stable (a versão atual do `eframe` requer Rust 1.95 ou superior).
 - `egui` / `eframe` para a interface.
-- Assimp (`russimp-ng` com bibliotecas pré-compiladas) para importar FBX.
+- Assimp (`russimp-ng` compilado do código-fonte via CMake/MSVC) para importar FBX; não depende de baixar um arquivo TAR de bibliotecas pré-compiladas.
 - `wgpu` e WGSL para o renderizador GPU próprio do aplicativo.
 - `bytemuck` para empacotar uniformes enviados ao shader.
 

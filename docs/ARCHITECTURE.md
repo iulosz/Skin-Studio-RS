@@ -2,7 +2,7 @@
 
 ## Princípio
 
-O projeto não chama `bpy`, não abre o Blender e não usa Cycles/Eevee. `wgpu` é a abstração de baixo nível da GPU; os shaders próprios do projeto compõem a visualização do material. O viewport atual rasteriza uma malha triangular no alvo offscreen com teste de profundidade e depois compõe esse alvo na interface. Uma esfera triangulada serve como modelo padrão; OBJ, glTF/GLB e FBX podem ser importados pelo seletor. O FBX é lido pelo Assimp (`russimp-ng` com pré-compilados), que triangula faces e aplica transformações de nós à geometria estática para visualização.
+O projeto não chama `bpy`, não abre o Blender e não usa Cycles/Eevee. `wgpu` é a abstração de baixo nível da GPU; os shaders próprios do projeto compõem a visualização do material. O viewport atual rasteriza uma malha triangular no alvo offscreen com teste de profundidade e depois compõe esse alvo na interface. Uma esfera triangulada serve como modelo padrão; OBJ, glTF/GLB e FBX podem ser importados pelo seletor. O FBX é lido pelo Assimp (`russimp-ng`, compilado do código-fonte via CMake/MSVC), que triangula faces e aplica transformações de nós à geometria estática para visualização. A compilação fonte evita o caminho de download de arquivo TAR pré-compilado que falhou no CI.
 
 ## Camadas previstas
 
